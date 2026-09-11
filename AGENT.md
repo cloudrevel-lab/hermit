@@ -142,7 +142,10 @@ The same source ships two ways.
   launcher by hand rather than using npm's shim, because the shim is
   `#!/usr/bin/env node` and the private runtime is not on PATH. The release
   workflow (`.github/workflows/release.yml`) runs on a `v*` tag, packs
-  `hermit.tgz` and attaches it to the GitHub release.
+  `hermit.tgz`, creates the GitHub release, and publishes
+  `@cloudrevel-lab/hermit-console` to GitHub Packages — that registry requires
+  a scoped name — with the workflow's `GITHUB_TOKEN`. It publishes to npmjs
+  only when `NPM_TOKEN` is set and the version is not already there.
 
 `server/index.mjs` exports `start()`. `make up` runs the file directly and
 watches stdout for `READY`; `bin/hermit.mjs` imports `start()` so it can open a

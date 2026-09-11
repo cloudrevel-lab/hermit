@@ -525,6 +525,11 @@ For CI, `.github/workflows/release.yml` publishes on a `v*` tag using the
 `NPM_TOKEN` repository secret instead.
 
 `make release` is the other route: it tags the current version (`vX.Y.Z`) and
-pushes the tag, which runs the release workflow and publishes to npm if the
-`NPM_TOKEN` secret is set. Use `make publish` **or** `make release`, not both,
-for the same version. Both refuse to run with uncommitted changes.
+pushes the tag, which runs the release workflow. That workflow creates a GitHub
+release with a `hermit.tgz` asset and publishes
+`@cloudrevel-lab/hermit-console` to **GitHub Packages** — a separate registry
+whose npm packages must be scoped to the owner, and which GitHub shows as
+**private** until you change its visibility (package settings → Danger Zone). It
+publishes to npm only if the `NPM_TOKEN` secret is set and that version is not
+already there. Use `make publish` **or** `make release`, not both, for the same
+version; both refuse to run with uncommitted changes.
