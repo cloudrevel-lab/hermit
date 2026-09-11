@@ -139,6 +139,8 @@ notices and cleans up the stale PID file.
 | `make install` | Install dependencies |
 | `make clean` | Remove `web/dist` and `.run` |
 | `make reset` | `clean`, and also drop the local database and cache |
+| `make publish` | Publish this version to npm, using the token in `~/.authinfo` |
+| `make release` | Tag the current version and push the tag, triggering the release workflow |
 
 `make up` refuses to start a second copy and tells you what is already running.
 
@@ -501,3 +503,7 @@ once when the token is created, works.
 
 For CI, `.github/workflows/release.yml` publishes on a `v*` tag using the
 `NPM_TOKEN` repository secret instead.
+
+From a source checkout, `make publish` and `make release` wrap those two steps.
+Both refuse to run with uncommitted changes, so what you publish matches a
+commit.

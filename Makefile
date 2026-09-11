@@ -9,8 +9,12 @@ NODE  := node
 RUN   := .run
 STAMP := node_modules/.install-stamp
 
+# Recursive (=) so the version is read only when a recipe uses it, keeping
+# make help working on a machine without Node installed.
+VERSION = $(shell $(NODE) -p "require('./package.json').version")
+
 .DEFAULT_GOAL := help
-.PHONY: help up down restart status logs dev build install clean reset open
+.PHONY: help up down restart status logs dev build install clean reset open publish release
 
 help: ## Show this help
 	@echo "Hermit console"
@@ -60,3 +64,21 @@ clean: ## Remove build output and run state
 reset: clean ## Also drop the local database and cache
 	@rm -f data/db.json data/cache.json
 	@echo "Removed data/db.json and data/cache.json"
+
+publish: ## Publish this version to npm using the token in ~/.authinfo
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is not clean - commit first so the tarball matches git."; exit 1; \
+	fi
+	@$(NODE) scripts/publish-npm.mjs
+
+release: ## Tag the current version and push the tag (runs the release workflow)
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is not clean - commit first so the tag matches what you see."; exit 1; \
+	fi
+	@tag="v$(VERSION)"; \
+	if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then \
+		echo "Tag $$tag already exists."; exit 1; \
+	fi; \
+	git tag -a "$$tag" -m "Hermit $$tag"; \
+	git push origin "$$tag"; \
+	echo "Pushed $$tag - the release workflow builds hermit.tgz and publishes to npm if NPM_TOKEN is set."
