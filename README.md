@@ -474,6 +474,17 @@ where your account can.
 *already carry your time*; it is not an activity report. Use it to correct time
 you have logged, not to discover tickets you forgot to log.
 
+**`hermit: command not found` after `npm install -g hermit-console`.** The
+command was installed into a Node prefix whose `bin` is not on your PATH — many
+machines have more than one Node (nvm, pnpm, Homebrew). Check `npm prefix -g`
+and add `<prefix>/bin` to your PATH, or use the one-line installer, which puts
+the launcher on your PATH for you.
+
+**The one-line installer fails while installing from npm right after a
+release.** A registry can briefly serve a new version's tag before the version
+itself, which shows up as `ETARGET No matching version found`. Wait a minute and
+run it again. The installer prints npm's error when it fails.
+
 ## License
 
 [MIT](LICENSE).

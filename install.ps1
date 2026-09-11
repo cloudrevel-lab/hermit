@@ -86,12 +86,17 @@ if ($env:HERMIT_TARBALL) {
 
 Say ('Installing Hermit into ' + $HermitHome + ' ...')
 New-Item -ItemType Directory -Force -Path $HermitHome | Out-Null
+$installLog = Join-Path $HermitHome 'npm-install.log'
 if ($npmCli) {
-  & $nodeExe $npmCli install --global --prefix $HermitHome --no-fund --no-audit $spec
+  & $nodeExe $npmCli install --global --prefix $HermitHome --no-fund --no-audit $spec *> $installLog
 } else {
-  & $npmCmd install --global --prefix $HermitHome --no-fund --no-audit $spec
+  & $npmCmd install --global --prefix $HermitHome --no-fund --no-audit $spec *> $installLog
 }
-if ($LASTEXITCODE -ne 0) { Die 'npm install failed' }
+if ($LASTEXITCODE -ne 0) {
+  Get-Content $installLog -Tail 15 | ForEach-Object { Write-Host $_ }
+  Die ('npm could not install ' + $spec + '; full log: ' + $installLog)
+}
+Remove-Item -Force $installLog -ErrorAction SilentlyContinue
 
 # npm's shims call node from PATH, which fails with a private runtime. Replace
 # them with a launcher that names the Node we resolved.

@@ -104,8 +104,13 @@ fi
 
 say "Installing Hermit into $HERMIT_HOME ..."
 mkdir -p "$HERMIT_HOME"
-run_npm install --global --prefix "$HERMIT_HOME" --no-fund --no-audit "$spec" >/dev/null 2>&1 \
-  || die "npm install failed (check your network, or set HERMIT_TARBALL to a tarball)"
+install_log="$HERMIT_HOME/npm-install.log"
+if ! run_npm install --global --prefix "$HERMIT_HOME" --no-fund --no-audit "$spec" >"$install_log" 2>&1; then
+  printf 'npm could not install %s:\n' "$spec" >&2
+  tail -n 15 "$install_log" | sed 's/^/  /' >&2
+  die "full log: $install_log"
+fi
+rm -f "$install_log"
 
 # npm's shim uses `#!/usr/bin/env node`, which fails when we installed a private
 # runtime that is not on PATH. Write our own launcher against the Node we found.
