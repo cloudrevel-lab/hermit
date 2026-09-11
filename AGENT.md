@@ -127,9 +127,11 @@ The same source ships two ways.
   `prepack` runs `vite build`, so the published tarball always carries a fresh
   `web/dist` (which is gitignored but explicitly listed in `files`). Users get
   `npx hermit-console` or `npm install -g hermit-console`. Maintainers publish
-  with `npm run publish:npm` (`scripts/publish-npm.mjs`), which reads the
-  `npmjs.com` token from `~/.authinfo` — npm does not read that file — into a
-  throwaway `.npmrc` and checks `npm whoami` before publishing.
+  with `make publish` (`scripts/publish-npm.mjs`), which reads the `npmjs.com`
+  token from `~/.authinfo` — npm does not read that file — into a throwaway
+  `.npmrc`, checks `npm whoami`, lists the last three published versions and
+  prompts for the new one (suggesting the next patch). It validates the version,
+  commits the bump as `Release vX.Y.Z`, and reverts it if the publish fails.
   `npm run set-npm-token` (`scripts/set-npm-token.mjs`) stores a token the same
   way, reading it from stdin so it is never echoed, and verifying it before
   anything is written.

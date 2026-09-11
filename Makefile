@@ -65,7 +65,7 @@ reset: clean ## Also drop the local database and cache
 	@rm -f data/db.json data/cache.json
 	@echo "Removed data/db.json and data/cache.json"
 
-publish: ## Publish this version to npm using the token in ~/.authinfo
+publish: ## Choose a version and publish to npm (token from ~/.authinfo)
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Working tree is not clean - commit first so the tarball matches git."; exit 1; \
 	fi

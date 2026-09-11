@@ -485,11 +485,20 @@ the conventions to follow when adding a page or an integration.
 
 ### Publishing
 
-`npm run publish:npm` publishes the package using the token you already keep in
-`~/.authinfo` as `machine npmjs.com`. npm itself does not read that file, so
-the script bridges the two: it writes a throwaway `.npmrc`, checks the token
-with `npm whoami`, then publishes. Use `npm run publish:npm -- --dry-run` to
-rehearse.
+`make publish` (or `npm run publish:npm`) releases a new version. It reads the
+token you already keep in `~/.authinfo` as `machine npmjs.com` — npm itself
+does not read that file, so the script bridges the two with a throwaway
+`.npmrc` and verifies the token with `npm whoami` first.
+
+It then lists the last three versions already on npm and asks which version to
+publish, suggesting the next patch. The version is validated (semver, not already
+published, not lower than the newest), written into `package.json` and
+`package-lock.json`, published, and committed as `Release vX.Y.Z`. A failed
+publish reverts the version change.
+
+- `HERMIT_VERSION=1.2.3 make publish` — skip the prompt.
+- `npm run publish:npm -- --dry-run` — show what would be published, changing
+  nothing.
 
 To store or replace the token without echoing it, paste it from the clipboard:
 
@@ -504,6 +513,7 @@ once when the token is created, works.
 For CI, `.github/workflows/release.yml` publishes on a `v*` tag using the
 `NPM_TOKEN` repository secret instead.
 
-From a source checkout, `make publish` and `make release` wrap those two steps.
-Both refuse to run with uncommitted changes, so what you publish matches a
-commit.
+`make release` is the other route: it tags the current version (`vX.Y.Z`) and
+pushes the tag, which runs the release workflow and publishes to npm if the
+`NPM_TOKEN` secret is set. Use `make publish` **or** `make release`, not both,
+for the same version. Both refuse to run with uncommitted changes.
