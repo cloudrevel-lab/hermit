@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
   id-token: write
 
 jobs:
@@ -26,7 +27,7 @@ jobs:
 
       # npm pack runs the prepack build too, so the tarball always carries a
       # fresh web/dist. The release asset gets a stable name the installer
-      # fetches from .../releases/latest/download/hermit.tgz.
+      # can take via HERMIT_TARBALL.
       - name: Pack
         run: |
           npm pack
@@ -38,8 +39,33 @@ jobs:
           files: hermit.tgz
           generate_release_notes: true
 
+      # make publish already covers the common case; skip when the version is
+      # already on npm so re-tagging a release does not fail the run.
       - name: Publish to npm
         if: env.NPM_TOKEN != ''
-        run: npm publish --provenance --access public
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published on npm; skipping."
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # GitHub Packages is a separate registry and its npm packages must be
+      # scoped to the owner, so publish the same code as
+      # @cloudrevel/hermit-console. npm stays the primary install channel.
+      - name: Publish to GitHub Packages
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          npm pkg set name="@cloudrevel/hermit-console"
+          printf '@cloudrevel:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > .npmrc
+          if npm view "@cloudrevel/hermit-console@$VERSION" version >/dev/null 2>&1; then
+            echo "Already on GitHub Packages; skipping."
+          else
+            npm publish
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
