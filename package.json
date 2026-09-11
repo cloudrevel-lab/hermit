@@ -1,16 +1,51 @@
 {
   "name": "hermit-console",
-  "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "A local console for comparing git releases across repositories and reconciling Jira releases and worklogs.",
   "type": "module",
-  "description": "Hermit \u2014 a git commit management console for release comparison and cherry-picking",
+  "license": "MIT",
+  "bin": {
+    "hermit": "bin/hermit.mjs"
+  },
+  "files": [
+    "bin/",
+    "server/",
+    "web/dist/",
+    "README.md",
+    "AGENT.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cloudrevel-lab/hermit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cloudrevel-lab/hermit/issues"
+  },
+  "homepage": "https://github.com/cloudrevel-lab/hermit#readme",
+  "keywords": [
+    "git",
+    "release",
+    "azure-devops",
+    "github",
+    "jira",
+    "cherry-pick",
+    "worklog"
+  ],
   "scripts": {
     "build": "vite build",
     "server": "node server/index.mjs",
-    "dev:web": "vite"
+    "dev:web": "vite",
+    "hermit": "node bin/hermit.mjs",
+    "publish:npm": "node scripts/publish-npm.mjs",
+    "set-npm-token": "node scripts/set-npm-token.mjs",
+    "prepack": "vite build"
   },
   "dependencies": {
     "express": "^5.2.1",

@@ -2,7 +2,7 @@ import express from 'express'
 import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { reposRouter } from './routes/repos.mjs'
 import { gitRouter } from './routes/git.mjs'
@@ -42,24 +42,44 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'Unexpected error', hint: err.hint || null })
 })
 
-// Port 0 asks the OS for any free port, which is what keeps `make up` from
-// colliding with whatever else is already running.
-const requested = Number(process.env.PORT || 0)
-const host = process.env.HOST || '127.0.0.1'
-
-const server = app.listen(requested, host, async () => {
-  const { port } = server.address()
-  const url = `http://${host}:${port}`
-  if (process.env.PORT_FILE) await writeFile(process.env.PORT_FILE, String(port))
-  console.log(`hermit listening on ${url}`)
-  // The start script watches for this line to learn the port it got.
-  console.log(`READY ${url}`)
-})
-
-for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.on(signal, () => {
-    console.log(`\nReceived ${signal}, shutting down.`)
-    server.close(() => process.exit(0))
-    setTimeout(() => process.exit(0), 3000).unref()
+/**
+ * Start the HTTP server and resolve with it and the URL it bound to.
+ *
+ * `make up` runs this file directly and watches stdout for `READY`. The
+ * installed CLI imports this function instead, so it can open a browser and own
+ * the shutdown signals itself.
+ *
+ * Port 0 asks the OS for any free port, which is what keeps `make up` from
+ * colliding with whatever else is already running.
+ */
+export function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1' } = {}) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, host, async () => {
+      const actual = server.address().port
+      const url = `http://${host}:${actual}`
+      if (process.env.PORT_FILE) await writeFile(process.env.PORT_FILE, String(actual))
+      console.log(`hermit listening on ${url}`)
+      // The start script watches for this line to learn the port it got.
+      console.log(`READY ${url}`)
+      resolve({ server, url })
+    })
+    server.on('error', reject)
   })
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  start()
+    .then(({ server }) => {
+      for (const signal of ['SIGTERM', 'SIGINT']) {
+        process.on(signal, () => {
+          console.log(`\nReceived ${signal}, shutting down.`)
+          server.close(() => process.exit(0))
+          setTimeout(() => process.exit(0), 3000).unref()
+        })
+      }
+    })
+    .catch(err => {
+      console.error(err.message)
+      process.exit(1)
+    })
 }

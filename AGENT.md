@@ -58,9 +58,12 @@ else's time or any repository.
 ## Layout
 
 ```
-Makefile               Entry point for everything; see targets in README
+Makefile               Entry point for a source checkout; see targets in README
 vite.config.mjs        Vite config; root is web/, proxies /api in dev
-package.json           One package for both halves — a single npm install
+package.json           Publishes the installable package; prepack builds the UI
+bin/hermit.mjs         Installed CLI: starts the server, opens a browser, Ctrl-C stops
+install.sh             macOS/Linux one-line installer (bootstraps Node if needed)
+install.ps1            Windows one-line installer
 
 scripts/
   runtime.mjs          Shared paths, PID file read/write, liveness checks
@@ -69,7 +72,7 @@ scripts/
   status.mjs           Reports PIDs, URL, and a live health check
 
 server/
-  index.mjs            Express app, static SPA, error handler, port-0 listen
+  index.mjs            Express app, static SPA, error handler; exports start()
   plugins/
     index.mjs          Registry: discovers plugin folders, routes URLs to them
     azure-devops/      Azure DevOps provider
@@ -79,7 +82,7 @@ server/
     http.mjs           Shared JSON fetch, auth, rate limits, mapLimit
     provider-error.mjs ProviderError: message + status + hint
     jira.mjs           Jira Cloud REST client
-    db.mjs             lowdb store: repos + settings
+    db.mjs             lowdb store: repos + settings; per-user dir when installed
     cache.mjs          Read-through TTL cache on a JSON file
     repos.mjs          CRUD over the repo list; legacy record migration
     versions.mjs       Version parsing, sorting, cross-repo collation
@@ -115,6 +118,39 @@ web/
       RepositoriesPage.vue Repo CRUD
       SettingsPage.vue     Settings, credential status, cache controls
 ```
+
+## Packaging and installing
+
+The same source ships two ways.
+
+- **npm.** `package.json` declares a `bin` (`hermit`) and a `files` allowlist;
+  `prepack` runs `vite build`, so the published tarball always carries a fresh
+  `web/dist` (which is gitignored but explicitly listed in `files`). Users get
+  `npx hermit-console` or `npm install -g hermit-console`. Maintainers publish
+  with `npm run publish:npm` (`scripts/publish-npm.mjs`), which reads the
+  `npmjs.com` token from `~/.authinfo` — npm does not read that file — into a
+  throwaway `.npmrc` and checks `npm whoami` before publishing.
+  `npm run set-npm-token` (`scripts/set-npm-token.mjs`) stores a token the same
+  way, reading it from stdin so it is never echoed, and verifying it before
+  anything is written.
+- **One-line installers.** `install.sh` / `install.ps1` install the published
+  npm package under `~/.hermit` (override `HERMIT_HOME`; `HERMIT_TARBALL` swaps
+  in a specific tarball such as the `hermit.tgz` release asset), downloading a
+  private Node runtime only when the machine lacks one. They write the `hermit`
+  launcher by hand rather than using npm's shim, because the shim is
+  `#!/usr/bin/env node` and the private runtime is not on PATH. The release
+  workflow (`.github/workflows/release.yml`) runs on a `v*` tag, packs
+  `hermit.tgz` and attaches it to the GitHub release.
+
+`server/index.mjs` exports `start()`. `make up` runs the file directly and
+watches stdout for `READY`; `bin/hermit.mjs` imports `start()` so it can open a
+browser and own the shutdown signals.
+
+**Data location.** `lib/db.mjs` keeps using a checkout's `data/` when it already
+exists, so a clone is unchanged. An installed package has no `data/`, so it uses
+the per-user directory — `~/Library/Application Support/Hermit` on macOS,
+`%APPDATA%\Hermit` on Windows, or `$XDG_DATA_HOME/hermit` on Linux. Override
+either with `HERMIT_DATA_DIR`.
 
 ## Request flow
 
@@ -351,6 +387,11 @@ changing this code.
 The context (`/myself` + `/configuration`) costs two Jira calls, so
 `loadSite()` caches it for five minutes; a range is fetched fresh every time
 because a write can change it.
+
+Each worklog in a range report carries its comment, flattened from Jira v3's
+ADF by `commentText()` (the raw ADF is still what an update re-sends). A row
+with a comment — or more than one worklog — expands in place to show each
+entry's time and comment.
 
 ## Conventions
 

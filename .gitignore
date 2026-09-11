@@ -10,3 +10,6 @@ data/cache.json
 
 .DS_Store
 *.log
+
+# npm pack / install artifacts
+*.tgz

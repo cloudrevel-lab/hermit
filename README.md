@@ -15,7 +15,79 @@ dropping a folder into `server/plugins/` — see [AGENT.md](AGENT.md).
 
 ---
 
+## Install
+
+### From npm
+
+Requires Node 20.19+ or 22.12+.
+
+```bash
+npm install -g hermit-console   # install the `hermit` command
+hermit                          # start it
+```
+
+Or run it without installing anything:
+
+```bash
+npx hermit-console
+```
+
+Package page: <https://www.npmjs.com/package/hermit-console>. To upgrade later,
+`npm install -g hermit-console@latest`.
+
+### One-line installer (macOS, Linux, Windows)
+
+No Node required. The script installs Hermit under `~/.hermit`, fetching a
+private Node runtime only when the machine does not already have a suitable one,
+and puts a `hermit` command on your PATH. It installs `hermit-console` from
+npm; set `HERMIT_TARBALL=<url-or-path>` to install a specific tarball instead.
+
+```bash
+# macOS and Linux
+curl -fsSL https://raw.githubusercontent.com/cloudrevel-lab/hermit/main/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/cloudrevel-lab/hermit/main/install.ps1 | iex
+```
+
+If the installer added a directory to your PATH, open a new terminal afterwards.
+
+### From source (development)
+
+```bash
+git clone https://github.com/cloudrevel-lab/hermit.git
+cd hermit
+make up
+```
+
+Whichever way you start it, Hermit serves on a free port bound to `127.0.0.1`
+and opens your browser. Stop it with Ctrl-C (or `make down` in a source
+checkout).
+
+### Command line
+
+```
+hermit [options]
+  -p, --port <n>      port to listen on (default: any free port)
+      --host <addr>   interface to bind (default: 127.0.0.1)
+      --data-dir <p>  where db.json and cache.json are stored
+      --no-open       do not open a browser
+  -h, --help          show this help
+  -v, --version       print the version
+```
+
+An installed copy keeps its data in a per-user directory — on macOS
+`~/Library/Application Support/Hermit`, on Windows `%APPDATA%\Hermit`, on
+Linux `$XDG_DATA_HOME/hermit` or `~/.local/share/hermit`. A source checkout
+keeps using its own `data/` directory. Override either with `--data-dir` or
+`HERMIT_DATA_DIR`.
+
 ## Requirements
+
+These are for the source checkout; the npm and installer routes above bring
+what they need.
 
 - Node 20.19+ or 22.12+ (Vite's floor). Developed on Node 24
 - `make` (macOS and Linux have it; on Windows run the `npm` scripts directly)
@@ -24,7 +96,10 @@ dropping a folder into `server/plugins/` — see [AGENT.md](AGENT.md).
   releases**, and the **Time logger**. A token acts as your Jira account, so it
   can read and write exactly what you can.
 
-## Start and stop
+## Run from source
+
+A source checkout is managed with `make`; `make up` installs, builds and
+starts it in the background.
 
 ```bash
 make up      # install, build, and start in the background
@@ -346,6 +421,9 @@ button next to *Copy notes*, or clear the whole cache from **Settings → Cache*
 
 ## Where things are stored
 
+In a source checkout these live under `data/`; an installed copy uses the
+per-user directory described in [Install](#install).
+
 | Path | Contents | In git? |
 | --- | --- | --- |
 | `data/db.json` | Your repo list, pinned Jira releases and settings | No |
@@ -394,7 +472,32 @@ where your account can.
 *already carry your time*; it is not an activity report. Use it to correct time
 you have logged, not to discover tickets you forgot to log.
 
+## License
+
+[MIT](LICENSE).
+
 ## Contributing
 
 See [AGENT.md](AGENT.md) for the architecture, module layout, API surface, and
 the conventions to follow when adding a page or an integration.
+
+### Publishing
+
+`npm run publish:npm` publishes the package using the token you already keep in
+`~/.authinfo` as `machine npmjs.com`. npm itself does not read that file, so
+the script bridges the two: it writes a throwaway `.npmrc`, checks the token
+with `npm whoami`, then publishes. Use `npm run publish:npm -- --dry-run` to
+rehearse.
+
+To store or replace the token without echoing it, paste it from the clipboard:
+
+```bash
+pbpaste | npm run set-npm-token          # macOS; on Linux: xclip -selection clipboard -o | ...
+```
+
+That checks the token against the registry before writing it, and refuses the
+masked `npm_xxxx…yyyy` form from the token list — only the full value, shown
+once when the token is created, works.
+
+For CI, `.github/workflows/release.yml` publishes on a `v*` tag using the
+`NPM_TOKEN` repository secret instead.

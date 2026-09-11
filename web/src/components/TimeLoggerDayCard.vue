@@ -16,6 +16,18 @@ const newTicket = ref('')
 const newHours = ref(null)
 const newComment = ref('')
 const busyKey = ref(null)
+// Ticket -> whether its row is expanded to show worklog comments.
+const expanded = ref({})
+
+/** A row opens when it has a comment to read, or more than one entry to break down. */
+function hasDetail (entry) {
+  return entry.worklogs.length > 1 || entry.worklogs.some((w) => w.comment)
+}
+
+function toggle (entry) {
+  if (!hasDetail(entry)) return
+  expanded.value = { ...expanded.value, [entry.ticket]: !expanded.value[entry.ticket] }
+}
 
 watch(
   () => props.day,
@@ -161,14 +173,23 @@ async function onAdd () {
     <v-divider v-if="day.entries.length" />
 
     <v-card-text v-if="day.entries.length" class="py-2">
+      <template v-for="entry in day.entries" :key="entry.ticket">
       <div
-        v-for="entry in day.entries"
-        :key="entry.ticket"
         class="entry-row py-2"
-        :class="{ 'entry-changed': changed === `${day.date}:${entry.ticket}` }"
+        :class="{
+          'entry-changed': changed === `${day.date}:${entry.ticket}`,
+          'entry-clickable': hasDetail(entry)
+        }"
+        @click="toggle(entry)"
       >
         <div class="entry-ident">
-          <a :href="entry.url" target="_blank" rel="noopener" class="text-primary font-weight-medium">
+          <a
+            :href="entry.url"
+            target="_blank"
+            rel="noopener"
+            class="text-primary font-weight-medium"
+            @click.stop
+          >
             {{ entry.ticket }}
           </a>
           <v-chip
@@ -180,12 +201,16 @@ async function onAdd () {
           >
             {{ entry.worklogs.length }} entries
           </v-chip>
+          <v-icon v-if="hasDetail(entry)" size="small" class="ml-1 entry-toggle">
+            {{ expanded[entry.ticket] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+          </v-icon>
           <div class="text-caption text-medium-emphasis entry-summary">{{ entry.summary }}</div>
         </div>
 
         <v-text-field
           v-model="draft[entry.ticket]"
           type="number"
+          @click.stop
           step="0.25"
           min="0"
           max="24"
@@ -195,7 +220,7 @@ async function onAdd () {
           class="entry-hours"
         />
 
-        <div class="entry-actions">
+        <div class="entry-actions" @click.stop>
           <v-tooltip :text="updateTip(entry)" location="top">
             <template #activator="{ props: tip }">
               <v-btn
@@ -239,6 +264,17 @@ async function onAdd () {
           </v-tooltip>
         </div>
       </div>
+
+      <div v-if="expanded[entry.ticket]" class="entry-detail px-4 pb-3">
+        <div v-for="w in entry.worklogs" :key="w.id" class="detail-row">
+          <div class="detail-meta text-caption text-medium-emphasis">
+            {{ w.started }} · {{ w.hours }}h
+          </div>
+          <div v-if="w.comment" class="detail-comment">{{ w.comment }}</div>
+          <div v-else class="detail-comment text-medium-emphasis font-italic">No comment</div>
+        </div>
+      </div>
+      </template>
     </v-card-text>
 
     <v-divider />
@@ -295,7 +331,8 @@ async function onAdd () {
   gap: 12px;
   flex-wrap: wrap;
 }
-.entry-row + .entry-row {
+/* General sibling, not adjacent: an expanded detail panel sits between rows. */
+.entry-row ~ .entry-row {
   border-top: 1px solid rgb(var(--v-border-color), 0.12);
 }
 /* A successful write often leaves the number the user typed on screen unchanged,
@@ -312,6 +349,27 @@ async function onAdd () {
   100% {
     background: transparent;
   }
+}
+.entry-clickable {
+  cursor: pointer;
+}
+.entry-clickable:hover {
+  background: rgba(var(--v-theme-on-surface), 0.04);
+  border-radius: 6px;
+}
+.entry-toggle {
+  color: rgb(var(--v-theme-on-surface-variant));
+}
+.entry-detail {
+  border-top: 1px dashed rgba(var(--v-border-color), 0.16);
+  background: rgba(var(--v-theme-on-surface), 0.03);
+}
+.detail-row + .detail-row {
+  margin-top: 8px;
+}
+.detail-comment {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .entry-ident {
   flex: 1 1 260px;

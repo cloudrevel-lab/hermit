@@ -1,10 +1,34 @@
 import { JSONFilePreset } from 'lowdb/node'
+import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-export const DATA_DIR = process.env.DATA_DIR || join(root, 'data')
+
+/**
+ * Where db.json and cache.json live.
+ *
+ * A checkout that already has data keeps it, so the Makefile workflow is
+ * unchanged. An installed package has no data/ next to it (and its directory
+ * may be read-only), so it writes to a per-user location instead. Both are
+ * overridable with HERMIT_DATA_DIR.
+ */
+function defaultDataDir () {
+  const override = process.env.HERMIT_DATA_DIR || process.env.DATA_DIR
+  if (override) return override
+  if (existsSync(join(root, 'data', 'db.json'))) return join(root, 'data')
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Hermit')
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'Hermit')
+  }
+  return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'hermit')
+}
+
+export const DATA_DIR = defaultDataDir()
 
 const defaults = {
   repos: [],

@@ -284,13 +284,18 @@ function labelFor (day) {
   return `${get('weekday')} ${get('day')} ${get('month')} ${get('year')}`
 }
 
-/** The offset string (e.g. `+10:00`) Jira's `started` field expects. */
+/**
+ * The offset string (e.g. `+1000`) Jira's `started` field expects. Jira
+ * parses `started` as `yyyy-MM-dd'T'HH:mm:ss.SSSZ`, whose `Z` is the RFC 822
+ * offset, so the ISO-8601 colon form (`+10:00`) is rejected with "Invalid date
+ * format" even though it is valid ISO 8601.
+ */
 function offsetAt (date, tz) {
   const name = new Intl.DateTimeFormat('en-US', { timeZone: safeZone(tz), timeZoneName: 'longOffset' })
     .formatToParts(date).find(p => p.type === 'timeZoneName')?.value || 'GMT'
   const match = /GMT([+-])(\d{1,2})(?::?(\d{2}))?/.exec(name)
-  if (!match) return '+00:00'
-  return `${match[1]}${match[2].padStart(2, '0')}:${match[3] || '00'}`
+  if (!match) return '+0000'
+  return `${match[1]}${match[2].padStart(2, '0')}${match[3] || '00'}`
 }
 
 /** A new worklog is stamped at the configured time of day on the requested date. */
@@ -388,6 +393,54 @@ async function totalSpent (ctx, ticket) {
 
 // ---------------------------------------------------------------------- entry
 
+/**
+ * Jira v3 returns worklog comments as Atlassian Document Format, not strings.
+ * Flatten a node to text for display; the raw ADF is still what the update path
+ * re-sends, so nothing here changes what gets written back.
+ */
+function adfText (node) {
+  if (!node) return ''
+  if (typeof node === 'string') return node
+  if (Array.isArray(node)) return node.map(adfText).join('')
+  switch (node.type) {
+    case 'text': return node.text || ''
+    case 'hardBreak': return '\n'
+    case 'mention': return node.attrs?.text ? `@${node.attrs.text}` : '@'
+    case 'emoji': return node.attrs?.shortName || node.attrs?.text || ''
+    case 'inlineCard': return node.attrs?.url || ''
+    case 'media':
+    case 'mediaInline':
+    case 'mediaSingle':
+    case 'mediaGroup':
+      return '[attachment]'
+    case 'rule': return '\n'
+    case 'bulletList':
+    case 'orderedList':
+      return (node.content || [])
+        .map((item, i) => `${node.type === 'orderedList' ? `${i + 1}.` : '•'} ${adfText(item).trim()}\n`)
+        .join('')
+    case 'paragraph':
+    case 'heading':
+    case 'blockquote':
+    case 'codeBlock':
+    case 'panel':
+      return `${adfText(node.content)}\n`
+    case 'table':
+      return `${(node.content || [])
+        .map(row => (row.content || []).map(cell => adfText(cell).trim()).join(' | '))
+        .join('\n')}\n`
+    default:
+      return adfText(node.content)
+  }
+}
+
+/** Plain text of a worklog comment, or null when there is none. */
+function commentText (comment) {
+  if (!comment) return null
+  if (typeof comment === 'string') return comment.trim() || null
+  return adfText(comment).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || null
+}
+
 function entry (worklogs, { ticket, summary, site, tz }) {
   const hours = worklogs.reduce((sum, w) => sum + w.timeSpentSeconds, 0) / 3600
   return {
@@ -398,7 +451,8 @@ function entry (worklogs, { ticket, summary, site, tz }) {
     worklogs: worklogs.map(w => ({
       id: w.id,
       hours: round2(w.timeSpentSeconds / 3600),
-      started: localTime(w.started, tz)
+      started: localTime(w.started, tz),
+      comment: commentText(w.comment)
     }))
   }
 }
