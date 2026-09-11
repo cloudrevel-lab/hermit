@@ -56,13 +56,13 @@ jobs:
 
       # GitHub Packages is a separate registry and its npm packages must be
       # scoped to the owner, so publish the same code as
-      # @cloudrevel/hermit-console. npm stays the primary install channel.
+      # @cloudrevel-lab/hermit-console. npm stays the primary install channel.
       - name: Publish to GitHub Packages
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          npm pkg set name="@cloudrevel/hermit-console"
-          printf '@cloudrevel:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > .npmrc
-          if npm view "@cloudrevel/hermit-console@$VERSION" version >/dev/null 2>&1; then
+          npm pkg set name="@cloudrevel-lab/hermit-console"
+          printf '@cloudrevel-lab:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > .npmrc
+          if npm view "@cloudrevel-lab/hermit-console@$VERSION" version >/dev/null 2>&1; then
             echo "Already on GitHub Packages; skipping."
           else
             npm publish
