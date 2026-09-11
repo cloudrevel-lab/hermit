@@ -1,0 +1,12 @@
+node_modules/
+web/dist/
+
+# Runtime state: pids, ports and logs for the running instance
+.run/
+
+# Local database and API cache
+data/db.json
+data/cache.json
+
+.DS_Store
+*.log

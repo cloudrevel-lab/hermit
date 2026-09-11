@@ -1,0 +1,74 @@
+:root {
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+}
+
+/* SHAs and branch names read as data, not prose. */
+.sha {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: -0.01em;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(127, 145, 190, 0.16);
+}
+
+.branch-chip {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.page-title {
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.section-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.commit-title {
+  font-size: 0.9rem;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.commit-meta {
+  font-size: 0.78rem;
+  opacity: 0.68;
+}
+
+.hover-row:hover {
+  background: rgba(127, 145, 190, 0.07);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.wrap-anywhere {
+  overflow-wrap: anywhere;
+}
+
+/* Keeps long commit lists scrolling inside their card rather than the page. */
+.scroll-pane {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.scroll-pane::-webkit-scrollbar { width: 10px; }
+.scroll-pane::-webkit-scrollbar-thumb {
+  background: rgba(127, 145, 190, 0.28);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
