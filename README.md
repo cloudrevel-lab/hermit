@@ -139,6 +139,7 @@ notices and cleans up the stale PID file.
 | `make install` | Install dependencies |
 | `make clean` | Remove `web/dist` and `.run` |
 | `make reset` | `clean`, and also drop the local database and cache |
+| `make secret` | Set the `NPM_TOKEN` GitHub repo secret from the `~/.authinfo` npm token |
 | `make publish` | Publish this version to npm, using the token in `~/.authinfo` |
 | `make release` | Tag the current version and push the tag, triggering the release workflow |
 
@@ -523,6 +524,18 @@ once when the token is created, works.
 
 For CI, `.github/workflows/release.yml` publishes on a `v*` tag using the
 `NPM_TOKEN` repository secret instead.
+
+`make secret` sets that repository secret for you from the same `~/.authinfo`
+npm token. It needs a GitHub credential too — a classic PAT with the `repo`
+scope (or a fine-grained token with Secrets read/write and admin on the repo):
+
+```
+machine github.com login <your-username> password <github-pat>
+```
+
+`gh` encrypts and uploads the value, so it never appears in argv. `make publish`
+and `make release` run the same step best-effort, so once that GitHub line is in
+place the secret keeps itself current.
 
 `make release` is the other route: it tags the current version (`vX.Y.Z`) and
 pushes the tag, which runs the release workflow. That workflow creates a GitHub

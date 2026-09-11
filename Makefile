@@ -14,7 +14,7 @@ STAMP := node_modules/.install-stamp
 VERSION = $(shell $(NODE) -p "require('./package.json').version")
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart status logs dev build install clean reset open publish release
+.PHONY: help up down restart status logs dev build install clean reset open secret publish release
 
 help: ## Show this help
 	@echo "Hermit console"
@@ -65,16 +65,21 @@ reset: clean ## Also drop the local database and cache
 	@rm -f data/db.json data/cache.json
 	@echo "Removed data/db.json and data/cache.json"
 
+secret: ## Set the NPM_TOKEN repo secret from the ~/.authinfo npm token
+	@$(NODE) scripts/set-npm-secret.mjs
+
 publish: ## Choose a version and publish to npm (token from ~/.authinfo)
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Working tree is not clean - commit first so the tarball matches git."; exit 1; \
 	fi
 	@$(NODE) scripts/publish-npm.mjs
+	@$(NODE) scripts/set-npm-secret.mjs --if-possible
 
 release: ## Tag the current version and push the tag (runs the release workflow)
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Working tree is not clean - commit first so the tag matches what you see."; exit 1; \
 	fi
+	@$(NODE) scripts/set-npm-secret.mjs --if-possible
 	@tag="v$(VERSION)"; \
 	if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then \
 		echo "Tag $$tag already exists."; exit 1; \

@@ -134,7 +134,11 @@ The same source ships two ways.
   commits the bump as `Release vX.Y.Z`, and reverts it if the publish fails.
   `npm run set-npm-token` (`scripts/set-npm-token.mjs`) stores a token the same
   way, reading it from stdin so it is never echoed, and verifying it before
-  anything is written.
+  anything is written. `make secret` (`scripts/set-npm-secret.mjs`) copies that
+  npm token into the GitHub repository secret `NPM_TOKEN` with `gh`, which
+  encrypts it; it takes the GitHub credential from a `github.com` line in
+  `~/.authinfo` or `GH_TOKEN`, and `make publish` / `make release` run it
+  best-effort so the tag workflow stays able to publish.
 - **One-line installers.** `install.sh` / `install.ps1` install the published
   npm package under `~/.hermit` (override `HERMIT_HOME`; `HERMIT_TARBALL` swaps
   in a specific tarball such as the `hermit.tgz` release asset), downloading a
