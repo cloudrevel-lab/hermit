@@ -9,12 +9,18 @@ NODE  := node
 RUN   := .run
 STAMP := node_modules/.install-stamp
 
+# Where backup/restore read and write. Override on the command line, e.g.
+# `make backup DATA_DIR=/some/data`.
+DATA_DIR      ?= $(CURDIR)/data
+BACKUP_DIR    ?= $(CURDIR)/backups
+NEWEST_BACKUP  = $(shell ls -1t $(BACKUP_DIR)/hermit-backup-*.tar.gz 2>/dev/null | head -1)
+
 # Recursive (=) so the version is read only when a recipe uses it, keeping
 # make help working on a machine without Node installed.
 VERSION = $(shell $(NODE) -p "require('./package.json').version")
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart status logs dev build install clean reset open secret publish release
+.PHONY: help up down restart status logs dev build install clean reset backup restore open secret publish release
 
 help: ## Show this help
 	@echo "Hermit console"
@@ -64,6 +70,19 @@ clean: ## Remove build output and run state
 reset: clean ## Also drop the local database and cache
 	@rm -f data/db.json data/cache.json
 	@echo "Removed data/db.json and data/cache.json"
+
+backup: ## Back up db.json and cache.json to backups/hermit-backup-<timestamp>.tar.gz
+	@$(NODE) bin/hermit.mjs backup --data-dir "$(DATA_DIR)" --out "$(BACKUP_DIR)"
+
+restore: ## Stop the app, then restore the newest backup (or FILE=<path>) into data/
+	@file="$(if $(FILE),$(FILE),$(NEWEST_BACKUP))"; \
+	if [ -z "$$file" ]; then \
+		echo "No backup found in $(BACKUP_DIR). Run 'make backup' first, or pass FILE=<path>."; exit 1; \
+	fi; \
+	if [ ! -f "$$file" ]; then echo "Backup not found: $$file"; exit 1; fi; \
+	$(MAKE) --no-print-directory down || exit 1; \
+	$(NODE) bin/hermit.mjs restore "$$file" --data-dir "$(DATA_DIR)" --force || exit 1; \
+	echo "Run 'make up' to start with the restored data."
 
 secret: ## Set the NPM_TOKEN repo secret from the ~/.authinfo npm token
 	@$(NODE) scripts/set-npm-secret.mjs

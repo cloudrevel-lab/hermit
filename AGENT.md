@@ -61,7 +61,7 @@ else's time or any repository.
 Makefile               Entry point for a source checkout; see targets in README
 vite.config.mjs        Vite config; root is web/, proxies /api in dev
 package.json           Publishes the installable package; prepack builds the UI
-bin/hermit.mjs         Installed CLI: starts the server, opens a browser, Ctrl-C stops
+bin/hermit.mjs         Installed CLI: serves the app, plus backup/restore subcommands
 install.sh             macOS/Linux one-line installer (bootstraps Node if needed)
 install.ps1            Windows one-line installer
 
@@ -84,6 +84,7 @@ server/
     jira.mjs           Jira Cloud REST client
     db.mjs             lowdb store: repos + settings; per-user dir when installed
     cache.mjs          Read-through TTL cache on a JSON file
+    backup.mjs         Tar.gz backup/restore of db.json + cache.json; never ~/.authinfo
     repos.mjs          CRUD over the repo list; legacy record migration
     versions.mjs       Version parsing, sorting, cross-repo collation
     git-service.mjs    Orchestration: fan out across repos, cache, shape output
@@ -155,11 +156,18 @@ The same source ships two ways.
 watches stdout for `READY`; `bin/hermit.mjs` imports `start()` so it can open a
 browser and own the shutdown signals.
 
-**Data location.** `lib/db.mjs` keeps using a checkout's `data/` when it already
-exists, so a clone is unchanged. An installed package has no `data/`, so it uses
+**Data location.** `lib/db.mjs` keeps using a checkout's `data/` directory, so a
+clone is unchanged. An installed package has no `data/`, so it uses
 the per-user directory — `~/Library/Application Support/Hermit` on macOS,
 `%APPDATA%\Hermit` on Windows, or `$XDG_DATA_HOME/hermit` on Linux. Override
 either with `HERMIT_DATA_DIR`.
+
+**Backups.** `lib/backup.mjs` packs `db.json` and `cache.json` into a gzipped
+ustar archive (`hermit backup`, or `make backup` in a checkout), so the result
+is readable by system `tar`. It never reads `~/.authinfo`; restore refuses to
+overwrite unless asked, and keeps the old files as
+`*.pre-restore-<timestamp>`. Stop the server before restoring — lowdb holds the
+store in memory and would write over the restored files.
 
 ## Request flow
 

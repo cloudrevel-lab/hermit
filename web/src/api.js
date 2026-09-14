@@ -23,6 +23,11 @@ export const api = {
   settings: () => call('/settings'),
   saveSettings: (settings) => call('/settings', { method: 'PUT', body: settings }),
 
+  cert: () => call('/cert'),
+  uploadCert: (pem) => call('/cert', { method: 'PUT', body: { pem } }),
+  deleteCert: () => call('/cert', { method: 'DELETE' }),
+  testCert: (url) => call('/cert/test', { method: 'POST', body: { url } }),
+
   cacheStats: () => call('/cache'),
   clearCache: (prefix) => call(`/cache${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''}`, { method: 'DELETE' }),
 

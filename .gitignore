@@ -8,6 +8,10 @@ web/dist/
 data/db.json
 data/cache.json
 
+# Local backups (make backup / hermit backup)
+backups/
+hermit-backup-*.tar.gz
+
 .DS_Store
 *.log
 

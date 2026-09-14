@@ -1,4 +1,5 @@
 import { credentialFor } from './authinfo.mjs'
+import { corpFetch, trustHint } from './corp-cert.mjs'
 import { ProviderError, unauthorised } from './provider-error.mjs'
 
 /**
@@ -12,7 +13,7 @@ import { ProviderError, unauthorised } from './provider-error.mjs'
 export async function requestJson (url, { method = 'GET', headers = {}, body, host, authHint } = {}) {
   let res
   try {
-    res = await fetch(url, {
+    res = await corpFetch(url, {
       method,
       headers: {
         Accept: 'application/json',
@@ -22,7 +23,12 @@ export async function requestJson (url, { method = 'GET', headers = {}, body, ho
       body: body ? JSON.stringify(body) : undefined
     })
   } catch (cause) {
-    throw new ProviderError(`Cannot reach ${host || new URL(url).host}: ${cause.message}`)
+    // cause.cause carries the OpenSSL code; fetch's own message is always the
+    // useless "fetch failed".
+    const reason = cause.cause?.code || cause.message
+    throw new ProviderError(`Cannot reach ${host || new URL(url).host}: ${reason}`, {
+      hint: trustHint(cause)
+    })
   }
 
   const contentType = res.headers.get('content-type') || ''

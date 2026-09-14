@@ -1,4 +1,5 @@
 import { credentialFor } from './authinfo.mjs'
+import { corpFetch, trustHint } from './corp-cert.mjs'
 
 export class JiraError extends Error {
   constructor (message, { status = 502, hint } = {}) {
@@ -41,9 +42,19 @@ async function request (host, path, params = {}) {
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
   }
-  const res = await fetch(url, {
-    headers: { Authorization: await authHeader(host), Accept: 'application/json' }
-  })
+  let res
+  try {
+    res = await corpFetch(url, {
+      headers: { Authorization: await authHeader(host), Accept: 'application/json' }
+    })
+  } catch (cause) {
+    // Without this the caller sees a bare TypeError: fetch failed, which hides
+    // the OpenSSL code that says a corporate proxy is re-signing the chain.
+    throw new JiraError(`Cannot reach ${host}: ${cause.cause?.code || cause.message}`, {
+      status: 502,
+      hint: trustHint(cause)
+    })
+  }
   const text = await res.text()
   let body
   try { body = JSON.parse(text) } catch { body = null }

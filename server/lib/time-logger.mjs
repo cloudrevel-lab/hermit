@@ -94,7 +94,7 @@ async function jiraRequest (site, path, { method = 'GET', body, query } = {}) {
 
   let res
   try {
-    res = await fetch(url, {
+    res = await corpFetch(url, {
       method,
       headers: {
         Authorization: await authHeader(host),
@@ -104,7 +104,10 @@ async function jiraRequest (site, path, { method = 'GET', body, query } = {}) {
       body: body !== undefined ? JSON.stringify(body) : undefined
     })
   } catch (cause) {
-    throw new TimeLoggerError(`Cannot reach ${host}: ${cause.message}`, { status: 502 })
+    throw new TimeLoggerError(`Cannot reach ${host}: ${cause.cause?.code || cause.message}`, {
+      status: 502,
+      hint: trustHint(cause)
+    })
   }
 
   const text = await res.text()

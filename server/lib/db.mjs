@@ -10,15 +10,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 /**
  * Where db.json and cache.json live.
  *
- * A checkout that already has data keeps it, so the Makefile workflow is
- * unchanged. An installed package has no data/ next to it (and its directory
- * may be read-only), so it writes to a per-user location instead. Both are
+ * A checkout has a data/ directory next to the code, so it keeps its data
+ * there. An installed package has no data/ (and its directory may be
+ * read-only), so it writes to a per-user location instead. Both are
  * overridable with HERMIT_DATA_DIR.
  */
 function defaultDataDir () {
   const override = process.env.HERMIT_DATA_DIR || process.env.DATA_DIR
   if (override) return override
-  if (existsSync(join(root, 'data', 'db.json'))) return join(root, 'data')
+  if (existsSync(join(root, 'data'))) return join(root, 'data')
   if (process.platform === 'win32') {
     return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Hermit')
   }

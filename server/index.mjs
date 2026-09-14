@@ -9,6 +9,7 @@ import { gitRouter } from './routes/git.mjs'
 import { jiraRouter } from './routes/jira.mjs'
 import { timeLoggerRouter } from './routes/time-logger.mjs'
 import { systemRouter } from './routes/system.mjs'
+import { install as installCorpCert } from './lib/corp-cert.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const app = express()
@@ -52,7 +53,17 @@ app.use((err, req, res, next) => {
  * Port 0 asks the OS for any free port, which is what keeps `make up` from
  * colliding with whatever else is already running.
  */
-export function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1' } = {}) {
+export async function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1' } = {}) {
+  // The corporate root CA has to be in the trust store before the first
+  // outbound request, so it is loaded here rather than on demand. A failure
+  // here is not fatal: the app still runs, it just cannot reach Jira from
+  // inside an intercepting network until the certificate is sorted out.
+  try {
+    if (await installCorpCert()) console.log('Loaded the corporate root CA')
+  } catch (err) {
+    console.error('Could not load the corporate root CA:', err.message)
+  }
+
   return new Promise((resolve, reject) => {
     const server = app.listen(port, host, async () => {
       const actual = server.address().port

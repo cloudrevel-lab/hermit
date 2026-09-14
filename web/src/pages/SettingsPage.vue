@@ -43,13 +43,18 @@ const auth = ref(null)
 const cache = ref(null)
 const providers = ref([])
 const saving = ref(false)
+const cert = ref(null)
+const certFile = ref(null)
+const certBusy = ref(false)
+const certTest = ref(null)
 
 async function load () {
   try {
-    const [cfg, authRes, cacheRes, providerRes] = await Promise.all([
-      api.settings(), api.auth(), api.cacheStats(), api.providers()
+    const [cfg, authRes, cacheRes, providerRes, certRes] = await Promise.all([
+      api.settings(), api.auth(), api.cacheStats(), api.providers(), api.cert()
     ])
     providers.value = providerRes.providers
+    cert.value = certRes
     settings.value = cfg.settings
     setDisplayTimezone(settings.value.timezone)
     auth.value = authRes
@@ -79,6 +84,62 @@ async function reloadAuth () {
   } catch (err) {
     notifyError(err)
   }
+}
+
+// Vuetify hands back a File for a single-file input and an array when the
+// component is configured for many; accept either so the card is not tied to it.
+function pickFile (value) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+// v-file-input models File | File[] | null depending on how it is used, and an
+// empty array is truthy — so the button state has to go through pickFile too.
+const selectedCert = computed(() => pickFile(certFile.value))
+
+async function uploadCert () {
+  const file = selectedCert.value
+  if (!file) return
+  certBusy.value = true
+  certTest.value = null
+  try {
+    cert.value = await api.uploadCert(await file.text())
+    certFile.value = null
+    notify('Certificate installed')
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    certBusy.value = false
+  }
+}
+
+async function removeCert () {
+  certBusy.value = true
+  certTest.value = null
+  try {
+    cert.value = await api.deleteCert()
+    notify('Certificate removed')
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    certBusy.value = false
+  }
+}
+
+async function testCert () {
+  certBusy.value = true
+  certTest.value = null
+  try {
+    certTest.value = await api.testCert()
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    certBusy.value = false
+  }
+}
+
+/** Certificate subjects are long; the CN is the part worth reading at a glance. */
+function commonName (subject) {
+  return (subject.match(/CN=([^,]+)/) || [null, subject])[1]
 }
 
 async function clearCache () {
@@ -294,6 +355,115 @@ onMounted(load)
             </tr>
           </tbody>
         </v-table>
+      </v-card-text>
+    </v-card>
+
+    <v-card class="mb-4">
+      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+        <v-icon icon="mdi-certificate-outline" size="18" /> Cert for corp network
+        <v-spacer />
+        <v-chip v-if="cert?.present" size="x-small" variant="tonal"
+                :color="cert.installed ? 'success' : 'warning'">
+          {{ cert.installed ? 'active' : 'stored, not loaded' }}
+        </v-chip>
+      </v-card-title>
+      <v-divider />
+      <v-card-text>
+        <div class="text-body-2 text-medium-emphasis mb-3">
+          Some office networks inspect HTTPS by re-signing it with their own root certificate.
+          Browsers accept it because IT installed it on the machine, but this app carries its own
+          list of trusted authorities and will refuse the connection with
+          <span class="mono">SELF_SIGNED_CERT_IN_CHAIN</span>. Upload that root certificate here and
+          it is trusted for outbound requests, alongside the usual public authorities.
+        </div>
+
+        <v-alert v-if="cert && !cert.canInstallAtRuntime" type="warning" density="compact" class="mb-3">
+          {{ cert.manualHint }}
+        </v-alert>
+
+        <v-alert v-if="cert?.error" type="error" density="compact" class="mb-3">
+          The stored file could not be read: {{ cert.error }}
+        </v-alert>
+
+        <div v-if="cert?.present">
+          <v-table density="compact" class="mb-3">
+            <thead>
+              <tr>
+                <th class="text-left">Certificate</th>
+                <th class="text-left">Role</th>
+                <th class="text-left">Expires</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="entry in cert.certs" :key="entry.fingerprint">
+                <td class="text-body-2">
+                  <div>{{ commonName(entry.subject) }}</div>
+                  <div class="text-caption text-medium-emphasis mono">{{ entry.subject }}</div>
+                </td>
+                <td>
+                  <v-chip v-if="!entry.isCa" size="x-small" variant="tonal" color="warning"
+                          title="Not a certificate authority, so it is stored but never trusted">
+                    ignored
+                  </v-chip>
+                  <v-chip v-else size="x-small" variant="tonal">{{ entry.isRoot ? 'root' : 'intermediate' }}</v-chip>
+                </td>
+                <td>
+                  <v-chip size="x-small" variant="tonal" :color="entry.expired ? 'error' : undefined">
+                    {{ new Date(entry.validTo).toLocaleDateString() }}
+                  </v-chip>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <div class="text-caption text-medium-emphasis mb-3">
+            Stored at <span class="mono">{{ cert.path }}</span>
+          </div>
+        </div>
+
+        <v-file-input
+          v-model="certFile"
+          label="Root CA file"
+          accept=".pem,.crt,.cer,.ca-bundle,.txt"
+          prepend-icon=""
+          prepend-inner-icon="mdi-paperclip"
+          density="compact"
+          hint="PEM / Base-64 text, starting with -----BEGIN CERTIFICATE-----. A bundle holding the whole chain is fine."
+          persistent-hint
+          :disabled="certBusy"
+        />
+
+        <div class="d-flex ga-2 mt-3 flex-wrap">
+          <v-btn size="small" color="primary" prepend-icon="mdi-upload"
+                 :disabled="!selectedCert || certBusy" :loading="certBusy" @click="uploadCert">
+            Upload and trust
+          </v-btn>
+          <v-btn v-if="cert?.present" size="small" variant="text" prepend-icon="mdi-lan-connect"
+                 :disabled="certBusy" @click="testCert">
+            Test connection
+          </v-btn>
+          <v-spacer />
+          <v-btn v-if="cert?.present" size="small" variant="text" color="error"
+                 prepend-icon="mdi-delete-outline" :disabled="certBusy" @click="removeCert">
+            Remove
+          </v-btn>
+        </div>
+
+        <v-alert v-if="certTest" :type="certTest.ok ? 'success' : 'error'" density="compact" class="mt-3">
+          <span v-if="certTest.ok">
+            Reached {{ certTest.host }} — the certificate chain was accepted.
+          </span>
+          <span v-else>
+            Could not reach {{ certTest.host }}:
+            <span class="mono">{{ certTest.code || certTest.error }}</span>
+          </span>
+        </v-alert>
+
+        <div class="text-caption text-medium-emphasis mt-3">
+          This trusts the certificate for this app only — nothing is added to the system store, and
+          verification stays on, so an unexpected certificate is still rejected. Entries that are not
+          themselves authorities are kept in the file but never trusted, so pasting a whole chain
+          straight off the wire is safe.
+        </div>
       </v-card-text>
     </v-card>
 
