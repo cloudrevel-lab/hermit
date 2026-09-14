@@ -1,6 +1,6 @@
 {
   "name": "hermit-console",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A local console for comparing git releases across repositories and reconciling Jira releases and worklogs.",
   "type": "module",
   "license": "MIT",
