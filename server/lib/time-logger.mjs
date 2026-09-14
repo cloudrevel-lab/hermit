@@ -1,4 +1,5 @@
 import { credentialFor } from './authinfo.mjs'
+import { corpFetch, trustHint } from './corp-cert.mjs'
 import { getDb } from './db.mjs'
 import { mapLimit } from './http.mjs'
 
