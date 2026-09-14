@@ -38,7 +38,7 @@ install: $(STAMP) ## Install dependencies
 build: install ## Build the web UI
 	@npx vite build
 
-up: build ## Start the app in the background on a free port
+up: build ## Start the app in the background, reusing the last port if it is free
 	@$(NODE) scripts/start.mjs
 
 dev: install ## Start with hot reload (also backgrounded; stop with make down)

@@ -8,6 +8,9 @@ web/dist/
 data/db.json
 data/cache.json
 
+# The port the app last bound to — machine-local, not shared
+data/last-port
+
 # Local backups (make backup / hermit backup)
 backups/
 hermit-backup-*.tar.gz

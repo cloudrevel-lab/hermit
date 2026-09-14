@@ -27,7 +27,7 @@ Usage
   hermit version                   print the version
 
 Serve options
-  -p, --port <n>      port to listen on (default: any free port)
+  -p, --port <n>      port to listen on (default: the last one used, else any free port)
       --host <addr>   interface to bind (default: 127.0.0.1)
       --data-dir <p>  where db.json and cache.json are stored
       --no-open       do not open a browser

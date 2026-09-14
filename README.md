@@ -536,6 +536,7 @@ per-user directory described in [Install](#install).
 | --- | --- | --- |
 | `data/db.json` | Your repo list, pinned Jira releases and settings | No |
 | `data/cache.json` | Cached branch and commit data | No |
+| `data/last-port` | The port the app last bound to, so the URL stays put | No |
 | `data/*.pre-restore-*` | Previous data kept when a restore overwrites it | No |
 | `backups/*.tar.gz` | `make backup` output | No |
 | `.run/*.pid` | PIDs of the running processes | No |
@@ -609,6 +610,12 @@ still show the PID; investigate it with `ps` before forcing anything.
 
 **The app was already running on a port I lost.** `make status` reads `.run/url`
 and reports it, or `make open` goes straight there.
+
+**The port changed when I restarted.** The app asks for the port it used last
+time, recorded in `data/last-port`, and only moves if something else has taken
+it — it says `Port <n> is in use, asking for another.` when that happens. An
+explicit `--port` is never moved: if it is busy, startup fails instead. Delete
+`data/last-port` to forget the port and start fresh.
 
 **Nothing loads and the log mentions a build.** Run `make build` on its own to
 see the Vite output; `make up` hides it unless it fails.

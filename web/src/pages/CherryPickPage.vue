@@ -24,6 +24,19 @@ const activeRepo = computed(() => repos.value.find(r => r.id === repoId.value) |
 // Some providers (GitHub) have no cherry-pick endpoint at all.
 const providerCanCherryPick = computed(() => activeRepo.value?.capabilities?.cherryPick ?? false)
 const writesAllowed = computed(() => settings.value.allowCherryPickWrites && providerCanCherryPick.value)
+
+// Settings holds a full base URL; CommitRow wants the bare host so it can link
+// each key to /browse/<key>. The compare page gets this from the Jira
+// cross-check response, which this page never calls, so it is derived here.
+const jiraHost = computed(() => {
+  const raw = settings.value.jiraBaseUrl
+  if (!raw) return ''
+  try {
+    return new URL(raw.includes('://') ? raw : `https://${raw}`).host
+  } catch {
+    return ''
+  }
+})
 const applying = ref(false)
 const topicBranch = ref('')
 const landMode = ref('auto')
@@ -345,6 +358,7 @@ onMounted(loadRepos)
               <v-divider v-if="index" />
               <CommitRow
                 :commit="commit"
+                :jira-host="jiraHost"
                 selectable
                 :selected="isStaged(side.key, commit.commitId)"
                 @update:selected="setStaged(side.key, commit.commitId, $event)"

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, openSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROOT, RUN_DIR, PROCS, ensureRunDir, isAlive, logFile, readPid, readUrl, sleep, writePid, writeUrl } from './runtime.mjs'
+import { recall as recallPort, remember as rememberPort } from '../server/lib/port-memory.mjs'
 
 const dev = process.argv.includes('--dev')
 
@@ -67,14 +68,21 @@ async function waitForLine (name, offset, pattern, timeoutMs = 60000) {
 async function main () {
   if (dev) {
     // API and Vite run as two processes; Vite proxies /api to the API port.
-    const apiOffset = launch('api', process.execPath, ['server/index.mjs'], { PORT: '0' })
+    // The API port is an internal detail here, so it stays throwaway and opts
+    // out of the port memory — the address the user visits is Vite's.
+    const apiOffset = launch('api', process.execPath, ['server/index.mjs'], { PORT: '0', HERMIT_PORT_MEMORY: '0' })
     const [, apiUrl] = await waitForLine('api', apiOffset, /^READY (\S+)$/m)
     console.log(`  api  ${apiUrl}`)
 
-    const webOffset = launch('web', 'npx', ['vite', '--host', '127.0.0.1'], { API_URL: apiUrl, NO_COLOR: '1', FORCE_COLOR: '0' })
+    // Vite is left on strictPort: false, so asking for the remembered port and
+    // letting it step forward on a clash matches what the server does.
+    const remembered = await recallPort()
+    const viteArgs = ['vite', '--host', '127.0.0.1', ...(remembered ? ['--port', String(remembered)] : [])]
+    const webOffset = launch('web', 'npx', viteArgs, { API_URL: apiUrl, NO_COLOR: '1', FORCE_COLOR: '0' })
     const [, webUrl] = await waitForLine('web', webOffset, /Local:\s+(\S+)/)
     const clean = webUrl.replace(/\/$/, '')
     writeUrl(clean)
+    await rememberPort(Number(new URL(clean).port))
     // One request kicks off dependency pre-bundling while we still have the
     // user's attention, so their first page load is not a re-optimize.
     await fetch(clean, { signal: AbortSignal.timeout(20000) }).catch(() => {})

@@ -10,6 +10,7 @@ import { jiraRouter } from './routes/jira.mjs'
 import { timeLoggerRouter } from './routes/time-logger.mjs'
 import { systemRouter } from './routes/system.mjs'
 import { install as installCorpCert } from './lib/corp-cert.mjs'
+import { recall as recallPort, remember as rememberPort } from './lib/port-memory.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const app = express()
@@ -51,7 +52,10 @@ app.use((err, req, res, next) => {
  * the shutdown signals itself.
  *
  * Port 0 asks the OS for any free port, which is what keeps `make up` from
- * colliding with whatever else is already running.
+ * colliding with whatever else is already running. Before falling back to that,
+ * the port from the previous run is tried, so the URL stays put across restarts.
+ * An explicitly requested port is never second-guessed: if it is taken, that is
+ * an error the caller asked for rather than something to work around.
  */
 export async function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1' } = {}) {
   // The corporate root CA has to be in the trust store before the first
@@ -64,17 +68,38 @@ export async function start ({ port = Number(process.env.PORT || 0), host = proc
     console.error('Could not load the corporate root CA:', err.message)
   }
 
+  // Only an automatic port (0) is open to being remembered or reassigned.
+  const automatic = !port
+  const wanted = automatic ? (await recallPort()) ?? 0 : port
+
+  let server
+  try {
+    server = await bind(wanted, host)
+  } catch (err) {
+    if (err.code !== 'EADDRINUSE' || !wanted || !automatic) throw err
+    console.log(`Port ${wanted} is in use, asking for another.`)
+    server = await bind(0, host)
+  }
+
+  const actual = server.address().port
+  const url = `http://${host}:${actual}`
+  await rememberPort(actual)
+  if (process.env.PORT_FILE) await writeFile(process.env.PORT_FILE, String(actual))
+  console.log(`hermit listening on ${url}`)
+  // The start script watches for this line to learn the port it got.
+  console.log(`READY ${url}`)
+  return { server, url }
+}
+
+/** Resolves with a listening server, or rejects with the bind error. */
+function bind (port, host) {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, host, async () => {
-      const actual = server.address().port
-      const url = `http://${host}:${actual}`
-      if (process.env.PORT_FILE) await writeFile(process.env.PORT_FILE, String(actual))
-      console.log(`hermit listening on ${url}`)
-      // The start script watches for this line to learn the port it got.
-      console.log(`READY ${url}`)
-      resolve({ server, url })
+    const server = app.listen(port, host)
+    server.once('listening', () => {
+      server.removeListener('error', reject)
+      resolve(server)
     })
-    server.on('error', reject)
+    server.once('error', reject)
   })
 }
 
