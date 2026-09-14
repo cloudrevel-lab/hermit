@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import MarkdownText from './MarkdownText.vue'
 
 // One day of the time-logger report. Ported from the old jira-tickets app,
 // with the theme coming from the Hermit shell instead of a local v-app.
@@ -18,6 +19,9 @@ const newComment = ref('')
 const busyKey = ref(null)
 // Ticket -> whether its row is expanded to show worklog comments.
 const expanded = ref({})
+// Worklog id -> editable hours for that single entry, independent of the
+// ticket-level box above it.
+const logDraft = ref({})
 
 /** A row opens when it has a comment to read, or more than one entry to break down. */
 function hasDetail (entry) {
@@ -33,8 +37,13 @@ watch(
   () => props.day,
   (day) => {
     const next = {}
-    for (const e of day.entries) next[e.ticket] = e.hours
+    const logs = {}
+    for (const e of day.entries) {
+      next[e.ticket] = e.hours
+      for (const w of e.worklogs) logs[w.id] = w.hours
+    }
     draft.value = next
+    logDraft.value = logs
     busyKey.value = null
   },
   { immediate: true, deep: true }
@@ -133,6 +142,58 @@ function onDelete (entry) {
       confirm: `Delete all time logged on ${entry.ticket} for ${props.day.label} (${entry.hours}h)?`
     })
   )
+}
+
+/** Retime one worklog. Zero is not accepted here - deleting has its own button. */
+function onLogUpdate (entry, log) {
+  const hours = num(logDraft.value[log.id])
+  if (!hours || hours <= 0) return
+  run(`lu:${log.id}`, () =>
+    props.perform({
+      kind: 'entryUpdate',
+      date: props.day.date,
+      ticket: entry.ticket,
+      id: log.id,
+      hours,
+      before: entry.hours
+    })
+  )
+}
+
+function onLogDelete (entry, log) {
+  run(`ld:${log.id}`, () =>
+    props.perform({
+      kind: 'entryDelete',
+      date: props.day.date,
+      ticket: entry.ticket,
+      id: log.id,
+      before: entry.hours,
+      confirm: `Delete the ${log.hours}h entry at ${log.started} on ${entry.ticket} (${props.day.label})?`
+    })
+  )
+}
+
+function logUpdateTip (log) {
+  const next = num(logDraft.value[log.id])
+  if (!next || next <= 0) return 'Enter hours greater than 0'
+  return `Set this entry to ${next}h (currently ${log.hours}h); the day's other entries are untouched`
+}
+
+// Shown in the Log button's tooltip so the shortcut is discoverable; the
+// handler itself accepts either modifier regardless of platform.
+const isMac = typeof navigator !== 'undefined' &&
+  /mac/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+const submitHint = isMac ? '\u2318 + Enter' : 'Ctrl + Enter'
+
+/**
+ * In the comment box Enter belongs to the textarea, so only the modified
+ * combination logs the entry. Both modifiers are accepted: Cmd is the Mac
+ * idiom, Ctrl the one everywhere else, and honouring each costs nothing.
+ */
+function onCommentKey (event) {
+  if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
+  event.preventDefault()
+  onAdd()
 }
 
 async function onAdd () {
@@ -267,10 +328,51 @@ async function onAdd () {
 
       <div v-if="expanded[entry.ticket]" class="entry-detail px-4 pb-3">
         <div v-for="w in entry.worklogs" :key="w.id" class="detail-row">
-          <div class="detail-meta text-caption text-medium-emphasis">
-            {{ w.started }} · {{ w.hours }}h
+          <div class="detail-head">
+            <div class="detail-meta text-caption text-medium-emphasis">
+              {{ w.started }} · {{ w.hours }}h
+            </div>
+            <div class="detail-actions">
+              <v-text-field
+                v-model="logDraft[w.id]"
+                type="number"
+                step="0.25"
+                min="0"
+                max="24"
+                density="compact"
+                hide-details
+                suffix="h"
+                class="detail-hours"
+              />
+              <v-tooltip :text="logUpdateTip(w)" location="top">
+                <template #activator="{ props: tip }">
+                  <v-btn
+                    v-bind="tip"
+                    size="x-small"
+                    color="primary"
+                    variant="tonal"
+                    :loading="busyKey === `lu:${w.id}`"
+                    @click="onLogUpdate(entry, w)"
+                  >
+                    Update
+                  </v-btn>
+                </template>
+              </v-tooltip>
+              <v-tooltip text="Delete just this entry" location="top">
+                <template #activator="{ props: tip }">
+                  <v-btn
+                    v-bind="tip"
+                    size="x-small"
+                    variant="text"
+                    icon="mdi-trash-can-outline"
+                    :loading="busyKey === `ld:${w.id}`"
+                    @click="onLogDelete(entry, w)"
+                  />
+                </template>
+              </v-tooltip>
+            </div>
           </div>
-          <div v-if="w.comment" class="detail-comment">{{ w.comment }}</div>
+          <MarkdownText v-if="w.comment" :text="w.comment" class="detail-comment" />
           <div v-else class="detail-comment text-medium-emphasis font-italic">No comment</div>
         </div>
       </div>
@@ -302,24 +404,32 @@ async function onAdd () {
         class="add-hours"
         @keyup.enter="onAdd"
       />
-      <v-text-field
+      <v-textarea
         v-model="newComment"
         label="Comment (optional)"
         density="compact"
         hide-details
+        rows="1"
+        max-rows="8"
+        auto-grow
         class="add-comment"
-        @keyup.enter="onAdd"
+        @keydown="onCommentKey"
       />
-      <v-btn
-        color="primary"
-        variant="tonal"
-        prepend-icon="mdi-plus"
-        :loading="busyKey === 'add'"
-        :disabled="!newTicket.trim() || !newHours"
-        @click="onAdd"
-      >
-        Log
-      </v-btn>
+      <v-tooltip :text="`Log the entry (${submitHint})`" location="top">
+        <template #activator="{ props: tip }">
+          <v-btn
+            v-bind="tip"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-plus"
+            :loading="busyKey === 'add'"
+            :disabled="!newTicket.trim() || !newHours"
+            @click="onAdd"
+          >
+            Log
+          </v-btn>
+        </template>
+      </v-tooltip>
     </v-card-actions>
   </v-card>
 </template>
@@ -365,10 +475,28 @@ async function onAdd () {
   background: rgba(var(--v-theme-on-surface), 0.03);
 }
 .detail-row + .detail-row {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(var(--v-border-color), 0.1);
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.detail-meta {
+  flex: 1 1 auto;
+}
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.detail-hours {
+  flex: 0 0 92px;
 }
 .detail-comment {
-  white-space: pre-wrap;
   word-break: break-word;
 }
 .entry-ident {
@@ -392,6 +520,13 @@ async function onAdd () {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  /* The comment box grows downward, so anchor the row rather than letting the
+     other controls drift down the middle of it. */
+  align-items: flex-start;
+}
+.add-row .v-btn {
+  /* Line the button up with the single-row height of the fields beside it. */
+  margin-top: 2px;
 }
 .add-ticket {
   flex: 0 1 170px;

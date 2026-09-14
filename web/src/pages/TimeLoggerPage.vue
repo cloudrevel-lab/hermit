@@ -100,12 +100,20 @@ async function retrieve () {
   }
 }
 
+/** One write call per kind. `id` targets a single worklog; without it the day's total moves. */
+function write (kind, { ticket, date, id, body }) {
+  if (kind === 'insert') return api.timeLoggerInsert(body)
+  if (kind === 'entryUpdate') return api.timeLoggerUpdateEntry(id, body)
+  if (kind === 'entryDelete') return api.timeLoggerDeleteEntry(id, { ticket, date })
+  return api.timeLoggerUpdate(body)
+}
+
 /** Apply one write, then fold the server's fresh view of that ticket back in. */
-async function perform ({ kind, date, ticket, hours, comment, confirm, before }) {
+async function perform ({ kind, date, ticket, id, hours, comment, confirm, before }) {
   if (confirm && !(await askConfirm(confirm))) return
   try {
     const body = { ticket, date, hours, ...(comment ? { comment } : {}) }
-    const res = kind === 'insert' ? await api.timeLoggerInsert(body) : await api.timeLoggerUpdate(body)
+    const res = await write(kind, { ticket, date, id, body })
     mergeEntry(date, res.entry)
     // Say what actually changed. The input already shows the number the user typed,
     // so without a before -> after the screen can look untouched on success.

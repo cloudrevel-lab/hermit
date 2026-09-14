@@ -58,5 +58,16 @@ export const api = {
   // Add hours on top of what is already logged.
   timeLoggerInsert: (payload) => call('/time-logger/worklog', { method: 'POST', body: payload }),
   // Make the day's total for the ticket exactly `hours` (0 deletes it).
-  timeLoggerUpdate: (payload) => call('/time-logger/worklog', { method: 'PUT', body: payload })
+  timeLoggerUpdate: (payload) => call('/time-logger/worklog', { method: 'PUT', body: payload }),
+  // Retime one worklog, leaving the day's other entries for that ticket alone.
+  timeLoggerUpdateEntry: (id, payload) =>
+    call(`/time-logger/worklog/${encodeURIComponent(id)}`, { method: 'PUT', body: payload }),
+  // Remove one worklog. The ticket and date travel in the query so the server can
+  // check the id really is the caller's own entry on that day.
+  timeLoggerDeleteEntry: (id, { ticket, date }) =>
+    call(
+      `/time-logger/worklog/${encodeURIComponent(id)}` +
+        `?ticket=${encodeURIComponent(ticket)}&date=${encodeURIComponent(date)}`,
+      { method: 'DELETE' }
+    )
 }

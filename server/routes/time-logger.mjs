@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import {
-  getContext, insertWorklog, rangeReport, updateWorklog
+  deleteWorklogEntry, getContext, insertWorklog, rangeReport, updateWorklog, updateWorklogEntry
 } from '../lib/time-logger.mjs'
 
 // Jira worklogs for the Time logger page. Reads are harmless; the POST/PUT
@@ -24,4 +24,18 @@ timeLoggerRouter.post('/worklog', async (req, res, next) => {
 // Update: make the day's total for the ticket exactly `hours` (0 deletes it).
 timeLoggerRouter.put('/worklog', async (req, res, next) => {
   try { res.json(await updateWorklog(req.body || {})) } catch (err) { next(err) }
+})
+
+// Update one worklog by id, leaving the day's other entries for that ticket alone.
+timeLoggerRouter.put('/worklog/:id', async (req, res, next) => {
+  try { res.json(await updateWorklogEntry({ ...(req.body || {}), id: req.params.id })) } catch (err) { next(err) }
+})
+
+// Delete one worklog by id, leaving the day's other entries for that ticket alone.
+timeLoggerRouter.delete('/worklog/:id', async (req, res, next) => {
+  try {
+    res.json(await deleteWorklogEntry({
+      ticket: req.query.ticket, date: req.query.date, id: req.params.id
+    }))
+  } catch (err) { next(err) }
 })

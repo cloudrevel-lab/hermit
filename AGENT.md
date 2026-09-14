@@ -226,6 +226,8 @@ compare normally. The UI renders those under "Not compared". Preserve this.
 | GET | `/api/time-logger/range` | Logged time per day in an inclusive `?from=&to=` range |
 | POST | `/api/time-logger/worklog` | Add hours on top of what is logged (insert) |
 | PUT | `/api/time-logger/worklog` | Set a ticket's day total exactly (0 deletes) |
+| PUT | `/api/time-logger/worklog/:id` | Retime one worklog, leaving the day's others alone |
+| DELETE | `/api/time-logger/worklog/:id` | Delete one worklog (`?ticket=&date=`) |
 
 Errors are `{ error, hint }` with a meaningful status. `hint` is a longer,
 multi-line remedy shown in the UI — use it for anything the user can fix, such
@@ -401,14 +403,46 @@ and never touched, as is the caller's own time on any other day. `hours=0`
 deletes only those same entries. Keep the account and day filters in place when
 changing this code.
 
+The per-entry endpoints (`/worklog/:id`) work the same way one level down:
+`ownWorklog()` re-reads the ticket, filters to the caller's worklogs on the
+requested day, and only then matches the id. An id that is someone else's, on
+another day, or simply stale cannot be reached — it comes back as a 404 telling
+the user to retrieve the range again. This is why the id alone is never trusted
+and the ticket and date always travel with it.
+
 The context (`/myself` + `/configuration`) costs two Jira calls, so
 `loadSite()` caches it for five minutes; a range is fetched fresh every time
 because a write can change it.
 
-Each worklog in a range report carries its comment, flattened from Jira v3's
-ADF by `commentText()` (the raw ADF is still what an update re-sends). A row
+Each worklog in a range report carries its comment, converted from Jira v3's
+ADF to **Markdown** by `commentText()` (the raw ADF is still what an update
+re-sends, so nothing in the read path changes what gets written back). A row
 with a comment — or more than one worklog — expands in place to show each
-entry's time and comment.
+entry's time and comment, with its own hours box, Update and delete button, so
+a single entry can be retimed or removed without collapsing the rest of the
+day's entries for that ticket into one.
+
+Comments render as formatted text, not a flat blob: emphasis, lists, links,
+code and tables survive the trip out of Jira. Two rules keep that safe, and
+both matter because the content is whatever anyone typed into Jira:
+
+- **Escape on the way out of ADF.** Everything that was literal text gets its
+  Markdown metacharacters escaped in `time-logger.mjs`, so a comment that
+  merely mentions an asterisk does not come out italic, and a line starting
+  `- ` does not become a list. Only real ADF marks and nodes produce syntax.
+- **Two gates on the way into the DOM.** `useMarkdown.js` runs markdown-it with
+  `html: false` (raw tags become text) and then re-parses the result through
+  DOMPurify against an explicit tag/attribute allowlist. Neither gate is
+  trusted to be sufficient alone. Links get `target="_blank"` and
+  `rel="noopener noreferrer nofollow"`. If you extend what the server emits,
+  extend the allowlist too, or the new tag is silently dropped.
+
+Writing is plain text, not Markdown: the add-comment box is a textarea where
+Enter makes a new line and Cmd/Ctrl+Enter logs the entry, and `adf()` turns
+what was typed into ADF — a blank line starts a paragraph, a single newline
+becomes a hardBreak. Nothing typed there is parsed as Markdown, which is why
+the read path escapes metacharacters: text comes back looking exactly as it
+was written.
 
 ## Conventions
 
@@ -421,6 +455,13 @@ their state and `api.js` is the only place that calls `fetch`. Component
 defaults live in `plugins/vuetify.js`, so prefer setting a default there over
 repeating props. Colours come from the theme; do not hard-code hex values in
 components.
+
+**Dependencies.** Deliberately few. `express` and `lowdb` are the only runtime
+deps; everything the browser needs is a devDependency because Vite bundles it
+into `web/dist/`, which is what ships. `markdown-it` and `dompurify` are there
+for worklog comments and are the only place `v-html` is used in the app — if
+you reach for `v-html` anywhere else, route it through `renderMarkdown()`
+rather than sanitising by hand.
 
 **Date rendering.** `useFormat.js` holds the display timezone in a module-level
 `ref`, so changing it in Settings re-renders every date on screen without a

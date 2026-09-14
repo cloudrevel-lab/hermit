@@ -337,8 +337,33 @@ function cleanHours (value, { allowZero = false } = {}) {
 const round2 = n => Math.round(n * 100) / 100
 const g = n => String(round2(n))
 
+/**
+ * Wrap a comment for the Jira v3 API, which takes Atlassian Document Format
+ * rather than a string.
+ *
+ * ADF has no notion of a newline inside a text node, so the shape has to carry
+ * the line structure: a blank line starts a new paragraph, and a single newline
+ * inside one becomes a hardBreak. Passing the raw text through instead would
+ * silently flatten every multi-line comment into one run.
+ */
 function adf (text) {
-  return { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }
+  const content = String(text)
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map(block => {
+      const nodes = []
+      block.split('\n').forEach((line, i) => {
+        if (i) nodes.push({ type: 'hardBreak' })
+        if (line) nodes.push({ type: 'text', text: line })
+      })
+      return { type: 'paragraph', content: nodes }
+    })
+    .filter(node => node.content.length)
+  return {
+    type: 'doc',
+    version: 1,
+    content: content.length ? content : [{ type: 'paragraph', content: [] }]
+  }
 }
 
 // --------------------------------------------------------------- Jira queries
@@ -399,50 +424,238 @@ async function totalSpent (ctx, ticket) {
 
 /**
  * Jira v3 returns worklog comments as Atlassian Document Format, not strings.
- * Flatten a node to text for display; the raw ADF is still what the update path
- * re-sends, so nothing here changes what gets written back.
+ * The block below renders a node to Markdown for display; the raw ADF is still
+ * what the update path re-sends, so nothing here changes what gets written back.
+ *
+ * Markdown rather than plain text because the UI renders it (markdown-it, then
+ * DOMPurify) — emphasis, lists, links and code survive the round trip out of
+ * Jira instead of collapsing into one flat blob. Everything that originated as
+ * literal text is escaped on the way in, so a comment that merely *mentions*
+ * an asterisk does not come out italic.
  */
-function adfText (node) {
+
+/** Escape the inline run of characters markdown-it would otherwise read as syntax. */
+function mdEscape (text) {
+  return text.replace(/[\\`*_[\]<>|~]/g, '\\$&')
+}
+
+/** Stop a line that merely starts with a marker from becoming a list, heading or quote. */
+function guardLineStarts (text) {
+  return text
+    .replace(/^(\s*)([-+#>])/gm, '$1\\$2')
+    .replace(/^(\s*\d+)([.)])/gm, '$1\\$2')
+}
+
+/** A backtick fence long enough to contain `text` verbatim. */
+function fenceFor (text, min) {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(m => m[0].length))
+  return '`'.repeat(Math.max(min, longest + 1))
+}
+
+/** Apply `open`/`close` to the text without trapping whitespace inside the markers. */
+function wrap (text, open, close = open) {
+  const [, lead, body, tail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text)
+  return body ? `${lead}${open}${body}${close}${tail}` : text
+}
+
+/** Angle-bracket a destination that would otherwise break the link syntax. */
+function mdUrl (href) {
+  return /[()\s]/.test(href) ? `<${href.replace(/[<>]/g, '')}>` : href
+}
+
+/** One ADF text node with its marks applied, innermost first. */
+function markedText (node) {
+  const marks = node.marks || []
+  const has = type => marks.some(m => m.type === type)
+  const raw = node.text || ''
+  let out
+  if (has('code')) {
+    const fence = fenceFor(raw, 1)
+    const pad = raw.startsWith('`') || raw.endsWith('`') ? ' ' : ''
+    out = `${fence}${pad}${raw}${pad}${fence}`
+  } else {
+    out = mdEscape(raw)
+  }
+  if (has('strike')) out = wrap(out, '~~')
+  if (has('em')) out = wrap(out, '*')
+  if (has('strong')) out = wrap(out, '**')
+  const href = marks.find(m => m.type === 'link')?.attrs?.href
+  if (href) out = `[${out.trim() || mdEscape(href)}](${mdUrl(href)})`
+  return out
+}
+
+/**
+ * An ADF date node carries a UTC-midnight epoch that stands for a calendar day,
+ * so the UTC slice *is* the intended day — this is not the ISO-slicing trap that
+ * applies to commit timestamps elsewhere in the app.
+ */
+function adfDay (timestamp) {
+  const at = new Date(Number(timestamp))
+  return Number.isNaN(at.getTime()) ? '' : at.toISOString().slice(0, 10)
+}
+
+function inlineMd (nodes) {
+  return (nodes || []).map(inlineNode).join('')
+}
+
+function inlineNode (node) {
   if (!node) return ''
-  if (typeof node === 'string') return node
-  if (Array.isArray(node)) return node.map(adfText).join('')
   switch (node.type) {
-    case 'text': return node.text || ''
+    case 'text': return markedText(node)
+    // Paragraphs are already split by blank lines, so a bare newline is the
+    // break; the renderer runs with `breaks: true` to honour it.
     case 'hardBreak': return '\n'
-    case 'mention': return node.attrs?.text ? `@${node.attrs.text}` : '@'
-    case 'emoji': return node.attrs?.shortName || node.attrs?.text || ''
-    case 'inlineCard': return node.attrs?.url || ''
+    case 'mention': {
+      const name = node.attrs?.text || ''
+      return mdEscape(name.startsWith('@') ? name : `@${name || 'unknown'}`)
+    }
+    case 'emoji': return node.attrs?.text || node.attrs?.shortName || ''
+    case 'date': return adfDay(node.attrs?.timestamp)
+    case 'status': return node.attrs?.text ? `\`${node.attrs.text}\`` : ''
+    case 'inlineCard':
+    case 'blockCard': {
+      const url = node.attrs?.url
+      return url ? `<${url}>` : ''
+    }
     case 'media':
     case 'mediaInline':
-    case 'mediaSingle':
-    case 'mediaGroup':
-      return '[attachment]'
-    case 'rule': return '\n'
-    case 'bulletList':
-    case 'orderedList':
-      return (node.content || [])
-        .map((item, i) => `${node.type === 'orderedList' ? `${i + 1}.` : '•'} ${adfText(item).trim()}\n`)
-        .join('')
-    case 'paragraph':
-    case 'heading':
-    case 'blockquote':
-    case 'codeBlock':
-    case 'panel':
-      return `${adfText(node.content)}\n`
-    case 'table':
-      return `${(node.content || [])
-        .map(row => (row.content || []).map(cell => adfText(cell).trim()).join(' | '))
-        .join('\n')}\n`
-    default:
-      return adfText(node.content)
+      return `\\[${mdEscape(node.attrs?.alt || 'attachment')}\\]`
+    default: return inlineMd(node.content)
   }
 }
 
-/** Plain text of a worklog comment, or null when there is none. */
+/** Indent every non-empty line of an already-rendered block. */
+function indentBlock (text, indent) {
+  if (!indent) return text
+  return text.split('\n').map(line => (line ? indent + line : line)).join('\n')
+}
+
+/** Prefix every line, including the blank ones, as a quote needs. */
+function quoteBlock (text, indent) {
+  return text.split('\n').map(line => `${indent}> ${line}`.trimEnd()).join('\n')
+}
+
+function blocksMd (nodes, indent) {
+  return (nodes || []).map(n => blockMd(n, indent)).filter(Boolean).join('\n\n')
+}
+
+/**
+ * A list item's own blocks. A nested list hugs the paragraph above it so the
+ * outer list stays tight; anything else keeps its blank line.
+ */
+function itemBody (item) {
+  const kids = item?.content || []
+  let out = ''
+  for (const node of kids) {
+    const part = blockMd(node, '')
+    if (!part) continue
+    if (out) out += node.type === 'bulletList' || node.type === 'orderedList' ? '\n' : '\n\n'
+    out += part
+  }
+  return out
+}
+
+function listMd (node, indent) {
+  const ordered = node.type === 'orderedList'
+  const start = Number(node.attrs?.order) || 1
+  return (node.content || [])
+    .map((item, i) => {
+      const marker = ordered ? `${start + i}. ` : '- '
+      const hang = ' '.repeat(marker.length)
+      const [first = '', ...rest] = itemBody(item).split('\n')
+      return [
+        `${indent}${marker}${first}`,
+        ...rest.map(line => (line ? `${indent}${hang}${line}` : ''))
+      ].join('\n')
+    })
+    .join('\n')
+}
+
+/** Cell contents collapse to one line — Markdown tables cannot hold blocks. */
+function cellMd (cell) {
+  return blocksMd(cell?.content, '')
+    .replace(/\s*\n+\s*/g, ' ')
+    // Literal pipes in text are already escaped by mdEscape; this catches the
+    // structural ones a nested table would otherwise leak into the row.
+    .replace(/(?<!\\)\|/g, '\\|')
+    .trim()
+}
+
+function tableMd (node, indent) {
+  const rows = (node.content || []).filter(r => r.type === 'tableRow')
+  if (!rows.length) return ''
+  const grid = rows.map(row => (row.content || []).map(cellMd))
+  const width = Math.max(...grid.map(r => r.length))
+  const pad = row => [...row, ...Array(Math.max(0, width - row.length)).fill('')]
+  // Markdown needs a header row; a table that starts with body cells gets a blank one.
+  const headed = (rows[0].content || []).every(c => c.type === 'tableHeader')
+  const head = headed ? pad(grid[0]) : Array(width).fill('')
+  const body = headed ? grid.slice(1) : grid
+  const line = cells => `| ${cells.join(' | ')} |`
+  return indentBlock(
+    [line(head), line(Array(width).fill('---')), ...body.map(r => line(pad(r)))].join('\n'),
+    indent
+  )
+}
+
+function blockMd (node, indent = '') {
+  if (!node) return ''
+  if (Array.isArray(node)) return blocksMd(node, indent)
+  switch (node.type) {
+    case 'paragraph':
+      return indentBlock(guardLineStarts(inlineMd(node.content)), indent)
+    case 'heading': {
+      const level = Math.min(6, Math.max(1, Number(node.attrs?.level) || 1))
+      const text = inlineMd(node.content).replace(/\n+/g, ' ').trim()
+      return text ? indentBlock(`${'#'.repeat(level)} ${text}`, indent) : ''
+    }
+    case 'blockquote':
+    case 'panel':
+      return quoteBlock(blocksMd(node.content, ''), indent)
+    case 'codeBlock': {
+      const text = (node.content || []).map(c => c.text || '').join('')
+      const lang = (node.attrs?.language || '').replace(/[^\w+#-]/g, '')
+      return indentBlock(`${fenceFor(text, 3)}${lang}\n${text}\n${fenceFor(text, 3)}`, indent)
+    }
+    case 'rule':
+      return indentBlock('---', indent)
+    case 'bulletList':
+    case 'orderedList':
+      return listMd(node, indent)
+    case 'table':
+      return tableMd(node, indent)
+    case 'mediaSingle':
+    case 'mediaGroup':
+      return indentBlock(inlineMd(node.content) || '\\[attachment\\]', indent)
+    case 'expand':
+    case 'nestedExpand': {
+      const title = node.attrs?.title || 'Details'
+      return [indentBlock(`**${mdEscape(title)}**`, indent), blocksMd(node.content, indent)]
+        .filter(Boolean).join('\n\n')
+    }
+    // Inline nodes reached directly (a bare text run, a hard break) still render.
+    case 'text':
+    case 'hardBreak':
+    case 'mention':
+    case 'emoji':
+    case 'date':
+    case 'status':
+    case 'inlineCard':
+    case 'blockCard':
+    case 'media':
+    case 'mediaInline':
+      return indentBlock(inlineNode(node), indent)
+    default:
+      return blocksMd(node.content, indent)
+  }
+}
+
+/** A worklog comment as Markdown, or null when there is none. */
 function commentText (comment) {
   if (!comment) return null
+  // Jira v2, and anything we wrote ourselves, hands back a bare string.
   if (typeof comment === 'string') return comment.trim() || null
-  return adfText(comment).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || null
+  return blockMd(comment).replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim() || null
 }
 
 function entry (worklogs, { ticket, summary, site, tz }) {
@@ -621,6 +834,74 @@ export async function updateWorklog ({ ticket, date, hours, comment }) {
     events: events.length
       ? events.map(([code, what]) => `HTTP ${code} - ${what}`)
       : ['nothing logged that day; no change'],
+    entry: await dayEntry(ctx, key, day)
+  }
+}
+
+/**
+ * Find one of the caller's worklogs on `ticket` for `day` by id.
+ *
+ * Looking it up rather than trusting the id means a stale page cannot reach a
+ * worklog belonging to someone else, or one the user is not looking at: the id
+ * has to be the caller's own and on the day the request names.
+ */
+async function ownWorklog (ctx, ticket, day, id) {
+  const wanted = String(id || '').trim()
+  if (!wanted) throw new TimeLoggerError('worklog id is required')
+  const mine = await myWorklogsOn(ctx, ticket, day.iso)
+  const found = mine.find(w => String(w.id) === wanted)
+  if (!found) {
+    throw new TimeLoggerError(
+      `no worklog ${wanted} of yours on ${ticket} for ${day.iso}; the page may be out of date`,
+      { status: 404, hint: 'Retrieve the range again to reload the current entries.' }
+    )
+  }
+  return found
+}
+
+/** Update one worklog in place, leaving the day's other entries alone. */
+export async function updateWorklogEntry ({ ticket, date, id, hours, comment }) {
+  const cfg = await config()
+  requireConfig(cfg)
+  const key = cleanTicket(ticket, cfg.project)
+  const day = parseIsoDay(date, 'date')
+  const amount = cleanHours(hours)
+  const note = typeof comment === 'string' ? comment.trim() || null : null
+  const ctx = await buildCtx(cfg)
+  const target = await ownWorklog(ctx, key, day, id)
+
+  const body = { started: target.started, timeSpentSeconds: Math.round(amount * 3600) }
+  // A PUT can drop fields it does not carry, so re-send the existing comment
+  // unless the caller supplied a new one.
+  if (note) body.comment = adf(note)
+  else if (target.comment) body.comment = target.comment
+  const updated = await jiraRequest(ctx.site,
+    `/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(target.id)}`,
+    { method: 'PUT', body })
+
+  return {
+    action: 'update-entry',
+    events: [`HTTP ${updated.status} - worklog ${target.id} set to ${updated.data?.timeSpent ?? ''}`],
+    entry: await dayEntry(ctx, key, day)
+  }
+}
+
+/** Delete one worklog, leaving the day's other entries alone. */
+export async function deleteWorklogEntry ({ ticket, date, id }) {
+  const cfg = await config()
+  requireConfig(cfg)
+  const key = cleanTicket(ticket, cfg.project)
+  const day = parseIsoDay(date, 'date')
+  const ctx = await buildCtx(cfg)
+  const target = await ownWorklog(ctx, key, day, id)
+
+  const { status } = await jiraRequest(ctx.site,
+    `/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(target.id)}`,
+    { method: 'DELETE' })
+
+  return {
+    action: 'delete-entry',
+    events: [`HTTP ${status} - deleted worklog ${target.id} (${g(target.timeSpentSeconds / 3600)}h)`],
     entry: await dayEntry(ctx, key, day)
   }
 }
