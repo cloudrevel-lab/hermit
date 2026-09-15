@@ -106,8 +106,10 @@ web/
     plugins/vuetify.js Theme and component defaults
     styles.css         The few global classes Vuetify does not cover
     composables/
-      useToast.js      Shared snackbar
-      useFormat.js     Dates, commit message parsing, issue key extraction
+      useToast.js        Shared snackbar
+      useFormat.js       Dates, commit message parsing, issue key extraction
+      useStored.js       localStorage-backed remembered UI selections
+      useResultCache.js  sessionStorage snapshot of the last page result
     components/
       CommitRow.vue    One commit; used by both compare pages
       EmptyHint.vue    Empty state with an optional call to action
@@ -495,6 +497,19 @@ Two rules apply when restoring:
   refs cannot be applied until the branch list for the restored repo has
   loaded, since changing the repo clears them; `pendingRestore` holds them
   until then.
+
+**Page result cache.** `composables/useResultCache.js` snapshots the result of
+an expensive, user-run operation — a release comparison or a two-ref compare —
+in `sessionStorage`, keyed by the exact inputs (repo, branches, repo set). A
+reload for the same inputs restores the result instead of recomputing it, and
+the page labels it "from cache" with a Recompute action. `App.vue` keeps the
+three data-heavy pages mounted with `<keep-alive :include>` so an ordinary page
+switch loses nothing at all; their `onActivated` hooks re-read only the cheap
+metadata (release overview, branch list, pinned Jira releases). This uses
+`sessionStorage` rather than `useStored`'s `localStorage` on purpose: a
+comparison can be large, and `localStorage` is the small store the remembered
+selections share. A mutation is never replayed from the cache — a cherry-pick
+is only ever restored as the result that was displayed, never re-applied.
 
 **Theme persistence.** The light/dark choice is stored in `localStorage` under
 `hermit-console:theme`. It is read *before* `createVuetify` runs and passed as

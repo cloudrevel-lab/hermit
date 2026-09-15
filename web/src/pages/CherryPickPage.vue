@@ -1,8 +1,10 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { notify, notifyError } from '../composables/useToast'
 import { readStored, writeStored } from '../composables/useStored'
+import { readCachedResult, writeCachedResult } from '../composables/useResultCache'
+import { relativeTime } from '../composables/useFormat'
 import CommitRow from '../components/CommitRow.vue'
 import EmptyHint from '../components/EmptyHint.vue'
 
@@ -15,6 +17,8 @@ const loadingBranches = ref(false)
 const comparing = ref(false)
 const result = ref(null)
 const settings = ref({})
+// Set only when the comparison on screen came from a stored snapshot.
+const restoredAt = ref(null)
 
 // Commits staged to move, keyed by the side they came FROM.
 const staged = ref({ left: new Set(), right: new Set() })
@@ -24,6 +28,12 @@ const activeRepo = computed(() => repos.value.find(r => r.id === repoId.value) |
 // Some providers (GitHub) have no cherry-pick endpoint at all.
 const providerCanCherryPick = computed(() => activeRepo.value?.capabilities?.cherryPick ?? false)
 const writesAllowed = computed(() => settings.value.allowCherryPickWrites && providerCanCherryPick.value)
+
+/** Identifies the comparison by the exact repo and ref pair it was run for. */
+const compareKey = computed(() => {
+  if (!repoId.value || !left.value || !right.value) return null
+  return `cherry:${repoId.value}:${left.value}..${right.value}`
+})
 
 // Settings holds a full base URL; CommitRow wants the bare host so it can link
 // each key to /browse/<key>. The compare page gets this from the Jira
@@ -77,6 +87,35 @@ watch([repoId, left, right], ([repo, leftRef, rightRef]) => {
   }
 })
 
+/** Stores the comparison for exactly these refs so a reload shows it again. */
+function persistResult () {
+  const key = compareKey.value
+  if (!key || !result.value) return
+  writeCachedResult(key, {
+    result: result.value,
+    staged: { left: [...staged.value.left], right: [...staged.value.right] }
+  })
+}
+
+/**
+ * Restores a snapshot for the refs now selected. Staged ids are re-validated
+ * against the restored result: a branch may have moved since the snapshot was
+ * taken, and an id no longer present must not stay staged.
+ */
+function restoreCachedResult () {
+  if (result.value) return
+  const cached = readCachedResult(compareKey.value)
+  if (!cached?.data?.result) return
+  const restored = cached.data.result
+  result.value = restored
+  restoredAt.value = cached.fetchedAt
+  const keep = side => new Set(
+    (cached.data.staged?.[side] || []).filter(id =>
+      (restored[side]?.commits || []).some(commit => commit.commitId === id))
+  )
+  staged.value = { left: keep('left'), right: keep('right') }
+}
+
 async function loadRepos () {
   try {
     const data = await api.repos()
@@ -94,6 +133,7 @@ async function loadRepos () {
 watch(repoId, async (id) => {
   left.value = right.value = null
   result.value = null
+  restoredAt.value = null
   branches.value = []
   if (!id) return
   loadingBranches.value = true
@@ -107,6 +147,7 @@ watch(repoId, async (id) => {
       if (branches.value.includes(pendingRestore.right)) right.value = pendingRestore.right
       pendingRestore = null
     }
+    restoreCachedResult()
   } catch (err) {
     notifyError(err)
   } finally {
@@ -122,6 +163,10 @@ function swapSides () {
   if (result.value) {
     result.value = { ...result.value, left: result.value.right, right: result.value.left }
     staged.value = { left: staged.value.right, right: staged.value.left }
+    restoredAt.value = null
+    // The snapshot now belongs to the swapped order, so rewrite it under the
+    // new key rather than leaving it under the old one.
+    persistResult()
   }
 }
 
@@ -129,9 +174,11 @@ async function compare (refresh = false) {
   if (!repoId.value || !left.value || !right.value) return
   comparing.value = true
   result.value = null
+  restoredAt.value = null
   staged.value = { left: new Set(), right: new Set() }
   try {
     result.value = await api.compareRefs({ repoId: repoId.value, left: left.value, right: right.value, refresh })
+    persistResult()
   } catch (err) {
     notifyError(err)
   } finally {
@@ -240,7 +287,29 @@ const sides = [
   { key: 'right', label: 'Right', arrow: 'mdi-arrow-left-bold', arrowLabel: 'Apply to left' }
 ]
 
+/**
+ * A kept-alive page keeps its branch list, which would hide a branch created
+ * since the last visit. Refetch on return, clearing a ref only if it has
+ * actually disappeared.
+ */
+async function refreshBranches () {
+  if (!repoId.value) return
+  try {
+    const data = await api.branches(repoId.value)
+    branches.value = data.branches.map(b => b.name)
+    if (left.value && !branches.value.includes(left.value)) left.value = null
+    if (right.value && !branches.value.includes(right.value)) right.value = null
+  } catch {
+    // The visible list is still usable; switching repo refetches it.
+  }
+}
+
 onMounted(loadRepos)
+
+onActivated(() => {
+  // The first activation runs alongside onMounted, before a repo is chosen.
+  if (repoId.value) refreshBranches()
+})
 </script>
 
 <template>
@@ -305,6 +374,14 @@ onMounted(loadRepos)
                :href="lastResult.pullRequest.url" target="_blank" rel="noopener">
           Open in {{ activeRepo?.providerName }}
         </v-btn>
+      </div>
+    </v-alert>
+
+    <v-alert v-if="restoredAt && result" type="info" density="compact" variant="tonal" class="mb-4">
+      <div class="d-flex align-center ga-3 flex-wrap">
+        <span>Showing the last comparison from cache ({{ relativeTime(restoredAt) }}).</span>
+        <v-btn size="x-small" variant="tonal" prepend-icon="mdi-refresh"
+               :loading="comparing" @click="compare(true)">Recompute</v-btn>
       </div>
     </v-alert>
 

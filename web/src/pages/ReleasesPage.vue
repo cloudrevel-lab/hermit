@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { notify, notifyError } from '../composables/useToast'
 import { readStored, writeStored } from '../composables/useStored'
+import { readCachedResult, writeCachedResult } from '../composables/useResultCache'
 import { relativeTime, shortDate } from '../composables/useFormat'
 import CommitRow from '../components/CommitRow.vue'
 import EmptyHint from '../components/EmptyHint.vue'
@@ -17,10 +18,23 @@ const base = ref(null)
 const filter = ref('')
 const jira = ref({ loading: false, version: null, issues: [], byKey: {}, host: '' })
 const settings = ref({})
+// Set only when the comparison on screen came from a stored snapshot rather
+// than a live fetch, so the page can say so and offer a recompute.
+const restoredAt = ref(null)
 
 const releases = computed(() => overview.value?.releases || [])
 const repos = computed(() => overview.value?.repos || [])
 const prefix = computed(() => overview.value?.prefix || 'release/')
+
+/**
+ * Identifies the exact comparison — the same branches over the same repos — so
+ * a stored snapshot is only ever served back for matching inputs.
+ */
+const compareKey = computed(() => {
+  if (!base.value || !target.value || !selectedRepoIds.value.length) return null
+  const repos = [...selectedRepoIds.value].sort().join(',')
+  return `releases:${prefix.value}${base.value}..${prefix.value}${target.value}|${repos}`
+})
 
 const releaseOptions = computed(() => releases.value.map(r => ({
   title: r.version,
@@ -70,6 +84,10 @@ async function load (refresh = false) {
     settings.value = cfg.settings
     selectedRepoIds.value = data.repos.filter(r => !r.error).map(r => r.id)
     restoreSelection(data.releases)
+    // Let the base/target watchers settle before looking up a snapshot, so the
+    // key is the pair the user actually compared.
+    await nextTick()
+    restoreCachedComparison()
     for (const err of data.errors) notify(`${err.repo}: ${err.message}`, { color: 'error', hint: err.hint })
   } catch (err) {
     notifyError(err)
@@ -78,10 +96,46 @@ async function load (refresh = false) {
   }
 }
 
+/**
+ * Puts back the last comparison for the restored selection, if a snapshot for
+ * exactly that selection exists. Only the first load does this — a kept-alive
+ * page still has its result in memory.
+ */
+function restoreCachedComparison () {
+  if (comparison.value) return
+  const cached = readCachedResult(compareKey.value)
+  if (!cached) return
+  comparison.value = cached.data.comparison
+  jiraVersionUrl.value = cached.data.jiraVersionUrl || ''
+  jira.value = { ...cached.data.jira, loading: false }
+  restoredAt.value = cached.fetchedAt
+}
+
+/**
+ * A kept-alive page does not remount, so pull the release metadata again when
+ * the user returns — a repository added elsewhere should show up here. The
+ * comparison on screen is left alone.
+ */
+async function refreshOverview () {
+  try {
+    const [data, cfg] = await Promise.all([api.releases(), api.settings()])
+    overview.value = data
+    settings.value = cfg.settings
+    const selectable = new Set(data.repos.filter(r => !r.error).map(r => r.id))
+    const next = selectedRepoIds.value.filter(id => selectable.has(id))
+    for (const id of selectable) if (!next.includes(id)) next.push(id)
+    selectedRepoIds.value = next
+  } catch {
+    // The data already on screen is still usable; the user can hit Refresh.
+  }
+}
+
 async function runCompare (refresh = false) {
   if (!base.value || !target.value) return
+  const key = compareKey.value
   comparing.value = true
   comparison.value = null
+  restoredAt.value = null
   try {
     comparison.value = await api.compare({
       base: prefix.value + base.value,
@@ -90,6 +144,13 @@ async function runCompare (refresh = false) {
       refresh
     })
     await loadJira()
+    if (key) {
+      writeCachedResult(key, {
+        comparison: comparison.value,
+        jiraVersionUrl: jiraVersionUrl.value,
+        jira: jira.value
+      })
+    }
   } catch (err) {
     notifyError(err)
   } finally {
@@ -168,26 +229,48 @@ function visibleCommits (result) {
   return (result.commits || []).filter(matches)
 }
 
+/** One repo's section of the notes, in the same shape the full copy uses. */
+function repoMarkdown (result) {
+  const lines = [`## ${result.repo.name} (${result.commits.length})`]
+  for (const c of result.commits) {
+    const from = c.sourceBranch ? ` _(from \`${c.sourceBranch}\`)_` : ''
+    lines.push(`- \`${c.shortId}\` ${c.message.split('\n')[0]} — ${c.author}${from}`)
+  }
+  return lines.join('\n')
+}
+
+function copyNotes (text, message) {
+  navigator.clipboard.writeText(text)
+    .then(() => notify(message))
+    .catch(() => notify('Could not access the clipboard', { color: 'error' }))
+}
+
 function copyMarkdown () {
   const lines = [`# ${base.value} → ${target.value}`, '']
   for (const result of comparison.value?.results || []) {
     if (result.status !== 'ok' || !result.commits.length) continue
-    lines.push(`## ${result.repo.name} (${result.commits.length})`)
-    for (const c of result.commits) {
-      const from = c.sourceBranch ? ` _(from \`${c.sourceBranch}\`)_` : ''
-      lines.push(`- \`${c.shortId}\` ${c.message.split('\n')[0]} — ${c.author}${from}`)
-    }
+    lines.push(repoMarkdown(result))
     lines.push('')
   }
-  navigator.clipboard.writeText(lines.join('\n'))
-    .then(() => notify('Release notes copied as Markdown'))
-    .catch(() => notify('Could not access the clipboard', { color: 'error' }))
+  copyNotes(lines.join('\n'), 'Release notes copied as Markdown')
+}
+
+function copyRepoMarkdown (result) {
+  copyNotes(
+    `# ${base.value} → ${target.value}\n\n${repoMarkdown(result)}`,
+    `Notes for ${result.repo.name} copied as Markdown`
+  )
 }
 
 const okResults = computed(() => (comparison.value?.results || []).filter(r => r.status === 'ok'))
 const otherResults = computed(() => (comparison.value?.results || []).filter(r => r.status !== 'ok'))
 
 onMounted(() => load())
+
+onActivated(() => {
+  // The first activation runs alongside onMounted, before the overview exists.
+  if (overview.value) refreshOverview()
+})
 </script>
 
 <template>
@@ -315,6 +398,14 @@ onMounted(() => load())
     <v-skeleton-loader v-if="comparing" type="article, list-item-three-line@3" class="rounded-lg" />
 
     <template v-if="comparison && !comparing">
+      <v-alert v-if="restoredAt" type="info" density="compact" variant="tonal" class="mb-3">
+        <div class="d-flex align-center ga-3 flex-wrap">
+          <span>Showing the last comparison from cache ({{ relativeTime(restoredAt) }}).</span>
+          <v-btn size="x-small" variant="tonal" prepend-icon="mdi-refresh"
+                 :loading="comparing" @click="runCompare(true)">Recompute</v-btn>
+        </div>
+      </v-alert>
+
       <!-- Summary -->
       <v-row dense class="mb-1">
         <v-col cols="6" md="3">
@@ -427,6 +518,9 @@ onMounted(() => load())
           <v-chip size="x-small" variant="tonal" :color="result.commits.length ? 'primary' : undefined">
             {{ result.commits.length }} commits
           </v-chip>
+          <v-btn class="btn-caption" size="x-small" variant="text" prepend-icon="mdi-content-copy"
+                 :disabled="!result.commits.length"
+                 @click="copyRepoMarkdown(result)">Copy notes</v-btn>
           <v-chip v-if="result.cached" size="x-small" variant="text" prepend-icon="mdi-database-outline"
                   class="text-medium-emphasis">
             cached {{ relativeTime(result.fetchedAt) }}

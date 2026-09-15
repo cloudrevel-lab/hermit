@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { notify, notifyError } from '../composables/useToast'
 import { relativeTime, shortDate } from '../composables/useFormat'
@@ -167,6 +167,12 @@ function copyKeys () {
 }
 
 onMounted(load)
+
+onActivated(() => {
+  // A kept-alive page holds its data. Re-read the pinned list and settings on
+  // return so a change made in Settings is picked up; the ticket list stays.
+  if (releases.value.length) load()
+})
 </script>
 
 <template>

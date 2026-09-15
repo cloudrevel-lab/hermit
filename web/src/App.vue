@@ -15,6 +15,11 @@ const auth = ref(null)
 const repos = ref([])
 const providers = ref([])
 
+// Pages whose in-memory state is expensive to rebuild stay mounted while the
+// user visits another page, so coming back is instant rather than a reload.
+// Repositories and Settings are left out so they always show fresh data.
+const cachedPages = ['ReleasesPage', 'CherryPickPage', 'JiraReleasesPage']
+
 const isDark = computed(() => theme.global.current.value.dark)
 
 function toggleTheme () {
@@ -152,7 +157,9 @@ onMounted(async () => {
 
     <v-main>
       <router-view v-slot="{ Component }">
-        <component :is="Component" />
+        <keep-alive :include="cachedPages">
+          <component :is="Component" />
+        </keep-alive>
       </router-view>
     </v-main>
 
