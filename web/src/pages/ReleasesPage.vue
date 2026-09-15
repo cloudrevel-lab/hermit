@@ -345,7 +345,7 @@ onActivated(() => {
           <v-chip size="small" variant="tonal" class="branch-chip">{{ prefix }}{{ base }}</v-chip>
           <v-icon icon="mdi-arrow-right" size="16" class="text-medium-emphasis" />
           <v-chip size="small" variant="tonal" color="primary" class="branch-chip">{{ prefix }}{{ target }}</v-chip>
-          <span class="text-caption text-medium-emphasis ml-2">
+          <span class="text-body-small text-medium-emphasis ml-2">
             shows what {{ target }} adds on top of {{ base }}
           </span>
         </div>
@@ -363,7 +363,7 @@ onActivated(() => {
 
     <!-- Release coverage across repos -->
     <v-card v-else-if="!comparison && !comparing" class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-view-grid-outline" size="18" /> Release branch coverage
       </v-card-title>
       <v-divider />
@@ -411,22 +411,22 @@ onActivated(() => {
         <v-col cols="6" md="3">
           <v-card><v-card-text>
             <div class="section-label">Commits</div>
-            <div class="text-h4 font-weight-bold numeric mt-1">{{ totalCommits }}</div>
+            <div class="text-headline-large font-weight-bold numeric mt-1">{{ totalCommits }}</div>
           </v-card-text></v-card>
         </v-col>
         <v-col cols="6" md="3">
           <v-card><v-card-text>
             <div class="section-label">Repos with changes</div>
-            <div class="text-h4 font-weight-bold numeric mt-1">
+            <div class="text-headline-large font-weight-bold numeric mt-1">
               {{ okResults.filter(r => r.commits.length).length }}
-              <span class="text-h6 text-medium-emphasis">/ {{ okResults.length }}</span>
+              <span class="text-title-large text-medium-emphasis">/ {{ okResults.length }}</span>
             </div>
           </v-card-text></v-card>
         </v-col>
         <v-col cols="6" md="3">
           <v-card><v-card-text>
             <div class="section-label">Issue keys</div>
-            <div class="text-h4 font-weight-bold numeric mt-1">{{ commitKeys.size }}</div>
+            <div class="text-headline-large font-weight-bold numeric mt-1">{{ commitKeys.size }}</div>
           </v-card-text></v-card>
         </v-col>
         <v-col cols="6" md="3">
@@ -444,7 +444,7 @@ onActivated(() => {
 
       <!-- Jira cross-check -->
       <v-card class="mb-4">
-        <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+        <v-card-title class="text-title-small d-flex align-center ga-2">
           <v-icon icon="mdi-jira" size="18" /> Jira cross-check
           <v-spacer />
           <v-chip v-if="jira.version" size="small" variant="tonal" color="info">
@@ -476,21 +476,21 @@ onActivated(() => {
           <v-row v-else-if="jira.version" dense class="mt-1">
             <v-col cols="12" md="6">
               <div class="section-label mb-2">In Jira release, no commit found ({{ jiraOnly.length }})</div>
-              <div v-if="!jiraOnly.length" class="text-body-2 text-medium-emphasis">Every issue has a matching commit.</div>
+              <div v-if="!jiraOnly.length" class="text-body-medium text-medium-emphasis">Every issue has a matching commit.</div>
               <div v-else class="d-flex ga-1 flex-wrap">
                 <v-chip v-for="issue in jiraOnly" :key="issue.key" size="small" variant="tonal" color="warning"
                         :href="issue.url" target="_blank" rel="noopener" class="mono">
                   {{ issue.key }}
                   <v-tooltip activator="parent" location="top" max-width="380">
                     <div class="font-weight-medium">{{ issue.summary }}</div>
-                    <div class="text-caption">{{ issue.status }}</div>
+                    <div class="text-body-small">{{ issue.status }}</div>
                   </v-tooltip>
                 </v-chip>
               </div>
             </v-col>
             <v-col cols="12" md="6">
               <div class="section-label mb-2">In commits, not in the Jira release ({{ commitsOnly.length }})</div>
-              <div v-if="!commitsOnly.length" class="text-body-2 text-medium-emphasis">No unexpected issue keys.</div>
+              <div v-if="!commitsOnly.length" class="text-body-medium text-medium-emphasis">No unexpected issue keys.</div>
               <div v-else class="d-flex ga-1 flex-wrap">
                 <v-chip v-for="key in commitsOnly" :key="key" size="small" variant="tonal" color="error"
                         :href="jira.byKey[key]?.url" target="_blank" rel="noopener" class="mono">
@@ -512,7 +512,7 @@ onActivated(() => {
 
       <!-- Per-repo commit lists -->
       <v-card v-for="result in okResults" :key="result.repo.id" class="mb-3">
-        <v-card-title class="text-subtitle-2 d-flex align-center ga-2 flex-wrap">
+        <v-card-title class="text-title-small d-flex align-center ga-2 flex-wrap">
           <v-icon icon="mdi-source-repository" size="18" />
           <span>{{ result.repo.name }}</span>
           <v-chip size="x-small" variant="tonal" :color="result.commits.length ? 'primary' : undefined">
@@ -526,13 +526,13 @@ onActivated(() => {
             cached {{ relativeTime(result.fetchedAt) }}
           </v-chip>
           <v-spacer />
-          <a :href="result.targetUrl" target="_blank" rel="noopener" class="text-caption text-decoration-none text-medium-emphasis">
+          <a :href="result.targetUrl" target="_blank" rel="noopener" class="text-body-small text-decoration-none text-medium-emphasis">
             open in Azure DevOps <v-icon icon="mdi-open-in-new" size="12" />
           </a>
         </v-card-title>
         <v-divider />
 
-        <div v-if="!result.commits.length" class="pa-4 text-body-2 text-medium-emphasis">
+        <div v-if="!result.commits.length" class="pa-4 text-body-medium text-medium-emphasis">
           Identical — {{ target }} has nothing that {{ base }} does not.
         </div>
         <div v-else class="scroll-pane" style="max-height: 640px">
@@ -540,7 +540,7 @@ onActivated(() => {
             <v-divider v-if="index" />
             <CommitRow :commit="commit" :issues="jira.byKey" :jira-host="jira.host" />
           </template>
-          <div v-if="!visibleCommits(result).length" class="pa-4 text-body-2 text-medium-emphasis">
+          <div v-if="!visibleCommits(result).length" class="pa-4 text-body-medium text-medium-emphasis">
             No commits match "{{ filter }}".
           </div>
         </div>
@@ -548,7 +548,7 @@ onActivated(() => {
 
       <!-- Repos that could not be compared -->
       <v-card v-if="otherResults.length" class="mb-3">
-        <v-card-title class="text-subtitle-2">Not compared</v-card-title>
+        <v-card-title class="text-title-small">Not compared</v-card-title>
         <v-divider />
         <v-list>
           <v-list-item v-for="result in otherResults" :key="result.repo.id">

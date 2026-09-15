@@ -98,7 +98,7 @@ onMounted(async () => {
           <v-icon icon="mdi-hexagon-multiple-outline" size="20" />
         </v-avatar>
         <div v-if="!rail" class="text-truncate">
-          <div class="text-body-2 font-weight-bold">Hermit Console</div>
+          <div class="text-body-medium font-weight-bold">Hermit Console</div>
         </div>
       </div>
 
@@ -165,7 +165,7 @@ onMounted(async () => {
 
     <v-snackbar v-model="toast.show" :color="toast.color" location="bottom right" :timeout="toast.hint ? 9000 : 4500">
       <div class="font-weight-medium">{{ toast.text }}</div>
-      <div v-if="toast.hint" class="text-caption mt-1" style="white-space: pre-line">{{ toast.hint }}</div>
+      <div v-if="toast.hint" class="text-body-small mt-1" style="white-space: pre-line">{{ toast.hint }}</div>
     </v-snackbar>
   </v-app>
 </template>

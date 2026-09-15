@@ -167,7 +167,7 @@ onMounted(load)
 <template>
   <v-container fluid class="pa-4 pa-md-6" style="max-width: 1000px">
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-tune" size="18" /> Release conventions
       </v-card-title>
       <v-divider />
@@ -190,7 +190,7 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-clock-outline" size="18" /> Dates and times
       </v-card-title>
       <v-divider />
@@ -205,14 +205,14 @@ onMounted(load)
           clearable
           @update:model-value="settings.timezone = $event || ''"
         />
-        <div class="text-body-2 text-medium-emphasis">
+        <div class="text-body-medium text-medium-emphasis">
           Right now that reads <strong class="mono">{{ nowPreview }}</strong>
         </div>
       </v-card-text>
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-jira" size="18" /> Jira
       </v-card-title>
       <v-divider />
@@ -233,7 +233,7 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-clock-edit-outline" size="18" /> Time logger
       </v-card-title>
       <v-divider />
@@ -272,12 +272,12 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-puzzle-outline" size="18" /> Providers
       </v-card-title>
       <v-divider />
       <v-card-text>
-        <div class="text-body-2 text-medium-emphasis mb-3">
+        <div class="text-body-medium text-medium-emphasis mb-3">
           Each provider is a plugin under <span class="mono">server/plugins/</span>. Adding one
           there makes it available here — nothing else needs changing.
         </div>
@@ -296,14 +296,14 @@ onMounted(load)
               </div>
             </v-expansion-panel-title>
             <v-expansion-panel-text>
-              <div class="text-body-2 mb-2">
+              <div class="text-body-medium mb-2">
                 URL format <span class="mono">{{ provider.urlExample }}</span>
               </div>
-              <div class="text-body-2 mb-2">
+              <div class="text-body-medium mb-2">
                 <span class="section-label">~/.authinfo line</span>
-                <pre class="mono text-caption mt-1 mb-0 pa-2 rounded" style="background: rgba(127,145,190,0.12); white-space: pre-wrap">machine &lt;host&gt; login &lt;{{ provider.credential.loginMeaning }}&gt; password &lt;{{ provider.credential.secretMeaning }}&gt;</pre>
+                <pre class="mono text-body-small mt-1 mb-0 pa-2 rounded" style="background: rgba(127,145,190,0.12); white-space: pre-wrap">machine &lt;host&gt; login &lt;{{ provider.credential.loginMeaning }}&gt; password &lt;{{ provider.credential.secretMeaning }}&gt;</pre>
               </div>
-              <div class="text-body-2">
+              <div class="text-body-medium">
                 <span class="section-label">Scopes</span>
                 <ul class="mt-1 ml-4">
                   <li v-for="scope in provider.credential.scopes" :key="scope">{{ scope }}</li>
@@ -323,14 +323,14 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-shield-key-outline" size="18" /> Credentials
         <v-spacer />
         <v-btn size="small" variant="text" prepend-icon="mdi-refresh" @click="reloadAuth">Re-read file</v-btn>
       </v-card-title>
       <v-divider />
       <v-card-text>
-        <div class="text-body-2 text-medium-emphasis mb-3">
+        <div class="text-body-medium text-medium-emphasis mb-3">
           Tokens are read from <span class="mono">{{ auth?.path }}</span> on the server and never sent to the browser.
         </div>
 
@@ -345,8 +345,8 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="(machine, index) in auth.machines" :key="index">
-              <td class="mono text-body-2">{{ machine.machine }}</td>
-              <td class="text-body-2">{{ machine.login || '—' }}</td>
+              <td class="mono text-body-medium">{{ machine.machine }}</td>
+              <td class="text-body-medium">{{ machine.login || '—' }}</td>
               <td>
                 <v-chip size="x-small" :color="machine.hasPassword ? 'success' : 'error'" variant="tonal">
                   {{ machine.hasPassword ? 'present' : 'missing' }}
@@ -359,7 +359,7 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-certificate-outline" size="18" /> Cert for corp network
         <v-spacer />
         <v-chip v-if="cert?.present" size="x-small" variant="tonal"
@@ -369,7 +369,7 @@ onMounted(load)
       </v-card-title>
       <v-divider />
       <v-card-text>
-        <div class="text-body-2 text-medium-emphasis mb-3">
+        <div class="text-body-medium text-medium-emphasis mb-3">
           Some office networks inspect HTTPS by re-signing it with their own root certificate.
           Browsers accept it because IT installed it on the machine, but this app carries its own
           list of trusted authorities and will refuse the connection with
@@ -396,9 +396,9 @@ onMounted(load)
             </thead>
             <tbody>
               <tr v-for="entry in cert.certs" :key="entry.fingerprint">
-                <td class="text-body-2">
+                <td class="text-body-medium">
                   <div>{{ commonName(entry.subject) }}</div>
-                  <div class="text-caption text-medium-emphasis mono">{{ entry.subject }}</div>
+                  <div class="text-body-small text-medium-emphasis mono">{{ entry.subject }}</div>
                 </td>
                 <td>
                   <v-chip v-if="!entry.isCa" size="x-small" variant="tonal" color="warning"
@@ -415,7 +415,7 @@ onMounted(load)
               </tr>
             </tbody>
           </v-table>
-          <div class="text-caption text-medium-emphasis mb-3">
+          <div class="text-body-small text-medium-emphasis mb-3">
             Stored at <span class="mono">{{ cert.path }}</span>
           </div>
         </div>
@@ -458,7 +458,7 @@ onMounted(load)
           </span>
         </v-alert>
 
-        <div class="text-caption text-medium-emphasis mt-3">
+        <div class="text-body-small text-medium-emphasis mt-3">
           This trusts the certificate for this app only — nothing is added to the system store, and
           verification stays on, so an unexpected certificate is still rejected. Entries that are not
           themselves authorities are kept in the file but never trusted, so pasting a whole chain
@@ -468,7 +468,7 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-database-outline" size="18" /> Cache
         <v-spacer />
         <v-btn size="small" variant="text" color="error" prepend-icon="mdi-delete-sweep-outline" @click="clearCache">
@@ -476,7 +476,7 @@ onMounted(load)
         </v-btn>
       </v-card-title>
       <v-divider />
-      <v-card-text class="text-body-2">
+      <v-card-text class="text-body-medium">
         <div v-if="cache" class="d-flex ga-6 flex-wrap">
           <div><div class="section-label">Entries</div><div class="numeric">{{ cache.entries }}</div></div>
           <div><div class="section-label">Size</div><div class="numeric">{{ formatBytes(cache.bytes) }}</div></div>
@@ -490,7 +490,7 @@ onMounted(load)
     </v-card>
 
     <v-card class="mb-4">
-      <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+      <v-card-title class="text-title-small d-flex align-center ga-2">
         <v-icon icon="mdi-alert-outline" size="18" /> Write access
       </v-card-title>
       <v-divider />
@@ -502,7 +502,7 @@ onMounted(load)
           hide-details
           label="Allow cherry-pick writes to Azure DevOps"
         />
-        <div class="text-body-2 text-medium-emphasis mt-2">
+        <div class="text-body-medium text-medium-emphasis mt-2">
           When off, the cherry-pick page only shows you the commands to run yourself. When on, the
           console can ask Azure DevOps to apply selected commits — always onto a new topic branch
           first, and it can open the pull request from that branch into the target for you.
@@ -518,7 +518,7 @@ onMounted(load)
           :disabled="!settings.allowCherryPickWrites"
           label="Let the console complete the pull request"
         />
-        <div class="text-body-2 text-medium-emphasis mt-2">
+        <div class="text-body-medium text-medium-emphasis mt-2">
           Sets the cherry-pick pull request to auto-complete, so it merges into the target branch as
           soon as branch policies pass — <strong>immediately, if the branch has no policies</strong>.
           The commits still go through a pull request and a merge commit, so there is a record and it

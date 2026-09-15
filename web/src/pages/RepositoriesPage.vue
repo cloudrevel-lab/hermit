@@ -117,7 +117,7 @@ onMounted(load)
   <v-container fluid class="pa-4 pa-md-6">
     <div class="d-flex align-center mb-4 ga-3">
       <div>
-        <div class="text-body-2 text-medium-emphasis">
+        <div class="text-body-medium text-medium-emphasis">
           Repositories tracked by this console. The provider is detected from each URL.</div>
       </div>
       <v-spacer />
@@ -149,7 +149,7 @@ onMounted(load)
             <td>
               <div class="font-weight-medium">{{ repo.name }}</div>
               <a :href="repo.url" target="_blank" rel="noopener"
-                 class="text-caption text-decoration-none text-medium-emphasis">
+                 class="text-body-small text-decoration-none text-medium-emphasis">
                 {{ repo.host }} <v-icon icon="mdi-open-in-new" size="11" />
               </a>
             </td>
@@ -158,16 +158,16 @@ onMounted(load)
                 {{ repo.providerName }}
               </v-chip>
             </td>
-            <td class="text-body-2">{{ repo.namespace }}</td>
-            <td class="mono text-body-2">{{ repo.repo }}</td>
+            <td class="text-body-medium">{{ repo.namespace }}</td>
+            <td class="mono text-body-medium">{{ repo.repo }}</td>
             <td>
               <v-btn v-if="!branchInfo[repo.id]" size="x-small" variant="text" prepend-icon="mdi-magnify"
                      @click="checkBranches(repo)">check</v-btn>
               <v-progress-circular v-else-if="branchInfo[repo.id].loading" size="16" width="2" indeterminate />
-              <span v-else-if="branchInfo[repo.id].error" class="text-error text-caption">
+              <span v-else-if="branchInfo[repo.id].error" class="text-error text-body-small">
                 {{ branchInfo[repo.id].error }}
               </span>
-              <span v-else class="text-body-2 numeric">
+              <span v-else class="text-body-medium numeric">
                 {{ branchInfo[repo.id].releases }} release
                 <span class="text-medium-emphasis">/ {{ branchInfo[repo.id].total }} total</span>
               </span>
@@ -189,7 +189,7 @@ onMounted(load)
     <!-- Add / edit -->
     <v-dialog v-model="dialog" max-width="640">
       <v-card>
-        <v-card-title class="text-subtitle-1">{{ form.id ? 'Edit repository' : 'Add repository' }}</v-card-title>
+        <v-card-title class="text-title-medium">{{ form.id ? 'Edit repository' : 'Add repository' }}</v-card-title>
         <v-divider />
         <v-card-text class="d-flex flex-column ga-4">
           <v-textarea
@@ -204,7 +204,7 @@ onMounted(load)
           />
 
           <div v-if="providers.length" class="d-flex ga-2 flex-wrap align-center">
-            <span class="text-caption text-medium-emphasis">Supported:</span>
+            <span class="text-body-small text-medium-emphasis">Supported:</span>
             <v-chip v-for="provider in providers" :key="provider.id" size="x-small" variant="tonal"
                     :prepend-icon="provider.icon">
               {{ provider.urlExample }}
@@ -220,14 +220,14 @@ onMounted(load)
               <strong>{{ probe.info.name }}</strong> in {{ probe.described.namespace }},
               default branch <span class="mono">{{ probe.info.defaultBranch }}</span>.
             </div>
-            <div v-if="!probe.provider.capabilities.cherryPick" class="text-caption mt-1">
+            <div v-if="!probe.provider.capabilities.cherryPick" class="text-body-small mt-1">
               {{ probe.provider.name }} has no cherry-pick API, so that page will show git
               commands instead of applying them.
             </div>
           </v-alert>
           <v-alert v-else-if="probe" type="error" density="compact">
             {{ probe.error }}
-            <div v-if="probe.hint" class="text-caption mt-1" style="white-space: pre-line">{{ probe.hint }}</div>
+            <div v-if="probe.hint" class="text-body-small mt-1" style="white-space: pre-line">{{ probe.hint }}</div>
           </v-alert>
 
           <v-text-field v-model="form.name" label="Display name" placeholder="my-service" />
@@ -247,8 +247,8 @@ onMounted(load)
     <!-- Delete confirmation -->
     <v-dialog :model-value="Boolean(confirmDelete)" max-width="440" @update:model-value="confirmDelete = null">
       <v-card>
-        <v-card-title class="text-subtitle-1">Remove repository?</v-card-title>
-        <v-card-text class="text-body-2">
+        <v-card-title class="text-title-medium">Remove repository?</v-card-title>
+        <v-card-text class="text-body-medium">
           <strong>{{ confirmDelete?.name }}</strong> will be dropped from this console.
           Nothing in Azure DevOps is changed.
         </v-card-text>

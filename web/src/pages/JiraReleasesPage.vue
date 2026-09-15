@@ -185,7 +185,7 @@ onActivated(() => {
       <!-- Pinned releases -->
       <v-col cols="12" md="4" lg="3">
         <v-card class="mb-3">
-          <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+          <v-card-title class="text-title-small d-flex align-center ga-2">
             <v-icon icon="mdi-tag-plus-outline" size="18" /> Pin a Fix Version
           </v-card-title>
           <v-divider />
@@ -211,11 +211,11 @@ onActivated(() => {
         </v-card>
 
         <v-card>
-          <v-card-title class="text-subtitle-2 d-flex align-center ga-2">
+          <v-card-title class="text-title-small d-flex align-center ga-2">
             <v-icon icon="mdi-bookmark-multiple-outline" size="18" /> Pinned
             <v-chip v-if="releases.length" size="x-small" variant="tonal">{{ releases.length }}</v-chip>
             <v-spacer />
-            <span v-if="releases.length > 1" class="text-caption text-medium-emphasis">click to switch</span>
+            <span v-if="releases.length > 1" class="text-body-small text-medium-emphasis">click to switch</span>
           </v-card-title>
           <v-divider />
           <v-progress-linear v-if="loading" indeterminate />
@@ -241,8 +241,8 @@ onActivated(() => {
                   class="mr-2"
                 />
               </template>
-              <v-list-item-title class="text-body-2">{{ release.name }}</v-list-item-title>
-              <v-list-item-subtitle v-if="release.projectKey" class="text-caption">
+              <v-list-item-title class="text-body-medium">{{ release.name }}</v-list-item-title>
+              <v-list-item-subtitle v-if="release.projectKey" class="text-body-small">
                 {{ release.projectKey }}
               </v-list-item-subtitle>
               <template #append>
@@ -266,7 +266,7 @@ onActivated(() => {
         <v-card v-else-if="selected">
           <v-card-title class="d-flex align-center ga-2 flex-wrap">
             <v-icon icon="mdi-clipboard-list-outline" size="18" />
-            <span class="text-subtitle-1 font-weight-medium">{{ selected.name }}</span>
+            <span class="text-title-medium font-weight-medium">{{ selected.name }}</span>
             <v-chip v-if="detail?.meta" size="small" variant="tonal"
                     :color="detail.meta.released ? 'success' : 'info'">
               {{ detail.meta.released ? 'released' : 'unreleased' }}
@@ -286,8 +286,8 @@ onActivated(() => {
 
           <v-card-text v-if="detail && statusBreakdown.total" class="pb-2">
             <div class="d-flex align-center ga-3 flex-wrap mb-2">
-              <div class="text-h5 font-weight-bold numeric">{{ statusBreakdown.total }}</div>
-              <span class="text-body-2 text-medium-emphasis">tickets</span>
+              <div class="text-headline-small font-weight-bold numeric">{{ statusBreakdown.total }}</div>
+              <span class="text-body-medium text-medium-emphasis">tickets</span>
               <v-chip size="small" variant="tonal" color="success">{{ statusBreakdown.done }} done</v-chip>
               <v-chip size="small" variant="tonal" color="info">{{ statusBreakdown.indeterminate }} in progress</v-chip>
               <v-chip size="small" variant="tonal">{{ statusBreakdown.new }} to do</v-chip>
@@ -315,8 +315,8 @@ onActivated(() => {
             <v-divider />
 
             <div v-if="!detail.issues.length" class="pa-8 text-center">
-              <div class="text-subtitle-1">No tickets carry this Fix Version</div>
-              <div class="text-body-2 text-medium-emphasis mt-1">
+              <div class="text-title-medium">No tickets carry this Fix Version</div>
+              <div class="text-body-medium text-medium-emphasis mt-1">
                 Check the name matches Jira exactly — it is matched literally.
               </div>
             </div>
@@ -341,18 +341,18 @@ onActivated(() => {
                         {{ issue.key }}
                       </a>
                     </td>
-                    <td class="text-body-2 wrap-anywhere">{{ issue.summary }}</td>
-                    <td class="text-body-2 text-medium-emphasis">{{ issue.type }}</td>
+                    <td class="text-body-medium wrap-anywhere">{{ issue.summary }}</td>
+                    <td class="text-body-medium text-medium-emphasis">{{ issue.type }}</td>
                     <td>
                       <v-chip size="x-small" variant="tonal" :color="statusColor(issue.statusCategory)">
                         {{ issue.status }}
                       </v-chip>
                     </td>
-                    <td class="text-body-2 text-medium-emphasis">{{ issue.assignee || '—' }}</td>
+                    <td class="text-body-medium text-medium-emphasis">{{ issue.assignee || '—' }}</td>
                   </tr>
                 </tbody>
               </v-table>
-              <div v-if="!issues.length" class="pa-4 text-body-2 text-medium-emphasis">
+              <div v-if="!issues.length" class="pa-4 text-body-medium text-medium-emphasis">
                 No tickets match "{{ filter }}".
               </div>
             </div>
@@ -363,8 +363,8 @@ onActivated(() => {
 
     <v-dialog :model-value="Boolean(confirmDelete)" max-width="440" @update:model-value="confirmDelete = null">
       <v-card>
-        <v-card-title class="text-subtitle-1">Unpin release?</v-card-title>
-        <v-card-text class="text-body-2">
+        <v-card-title class="text-title-medium">Unpin release?</v-card-title>
+        <v-card-text class="text-body-medium">
           <strong>{{ confirmDelete?.name }}</strong> will be removed from this list.
           Nothing in Jira is changed.
         </v-card-text>

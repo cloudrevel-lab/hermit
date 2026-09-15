@@ -165,7 +165,7 @@ onMounted(async () => {
   <v-container fluid class="pa-4 pa-md-6" style="max-width: 1000px">
     <div class="d-flex align-center flex-wrap ga-2 mb-4">
       <v-icon icon="mdi-clock-edit-outline" size="22" />
-      <span class="text-subtitle-1 font-weight-medium">Jira time log</span>
+      <span class="text-title-medium font-weight-medium">Jira time log</span>
       <v-chip v-if="ctx && ctx.configured" size="small" variant="tonal">
         {{ ctx.project }} · {{ ctx.hoursPerDay }}h/day
       </v-chip>
@@ -176,7 +176,7 @@ onMounted(async () => {
 
     <v-alert v-if="ctx && !ctx.configured" type="info" variant="tonal" class="mb-4">
       <div class="font-weight-medium mb-1">Time logger is not configured</div>
-      <div class="text-body-2">
+      <div class="text-body-medium">
         Enter your Jira site and project key in
         <router-link to="/settings">Settings</router-link>, then reopen this page.
       </div>
@@ -207,7 +207,7 @@ onMounted(async () => {
         </v-btn>
       </div>
       <div class="mt-3 d-flex align-center flex-wrap ga-2">
-        <span class="text-caption text-medium-emphasis mr-1">Quick range:</span>
+        <span class="text-body-small text-medium-emphasis mr-1">Quick range:</span>
         <v-btn size="small" variant="text" @click="preset('today')">Today</v-btn>
         <v-btn size="small" variant="text" @click="preset('week')">This week</v-btn>
         <v-btn size="small" variant="text" @click="preset('lastWeek')">Last week</v-btn>
@@ -223,24 +223,24 @@ onMounted(async () => {
     <v-card v-if="report" class="mb-5 pa-4" variant="tonal">
       <div class="d-flex flex-wrap ga-6 align-center">
         <div>
-          <div class="text-caption text-medium-emphasis">Logged</div>
-          <div class="text-h6">{{ report.total }}h</div>
+          <div class="text-body-small text-medium-emphasis">Logged</div>
+          <div class="text-title-large">{{ report.total }}h</div>
         </div>
         <div>
-          <div class="text-caption text-medium-emphasis">Capacity (weekdays)</div>
-          <div class="text-h6">{{ capacity }}h</div>
+          <div class="text-body-small text-medium-emphasis">Capacity (weekdays)</div>
+          <div class="text-title-large">{{ capacity }}h</div>
         </div>
         <div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-body-small text-medium-emphasis">
             {{ shortfall >= 0 ? 'Shortfall' : 'Over' }}
           </div>
-          <div class="text-h6" :class="shortfall > 0 ? 'text-warning' : shortfall < 0 ? 'text-error' : 'text-success'">
+          <div class="text-title-large" :class="shortfall > 0 ? 'text-warning' : shortfall < 0 ? 'text-error' : 'text-success'">
             {{ Math.abs(shortfall) }}h
           </div>
         </div>
         <div>
-          <div class="text-caption text-medium-emphasis">Range</div>
-          <div class="text-body-1">{{ report.from }} → {{ report.to }}</div>
+          <div class="text-body-small text-medium-emphasis">Range</div>
+          <div class="text-body-large">{{ report.from }} → {{ report.to }}</div>
         </div>
       </div>
     </v-card>
@@ -265,7 +265,7 @@ onMounted(async () => {
 
     <v-dialog v-model="confirmDialog.show" max-width="520" persistent>
       <v-card>
-        <v-card-title class="text-body-1">Confirm</v-card-title>
+        <v-card-title class="text-body-large">Confirm</v-card-title>
         <v-card-text>{{ confirmDialog.text }}</v-card-text>
         <v-card-actions>
           <v-spacer />

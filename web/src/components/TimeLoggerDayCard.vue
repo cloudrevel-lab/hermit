@@ -219,10 +219,10 @@ async function onAdd () {
     <v-card-item>
       <template #prepend>
         <v-avatar :color="totalColor" variant="tonal" size="46">
-          <span class="text-caption font-weight-bold">{{ day.total }}h</span>
+          <span class="text-body-small font-weight-bold">{{ day.total }}h</span>
         </v-avatar>
       </template>
-      <v-card-title class="text-body-1 font-weight-medium">
+      <v-card-title class="text-body-large font-weight-medium">
         {{ day.label }}
         <v-chip v-if="day.weekend" size="x-small" class="ml-2" variant="tonal">weekend</v-chip>
       </v-card-title>
@@ -265,7 +265,7 @@ async function onAdd () {
           <v-icon v-if="hasDetail(entry)" size="small" class="ml-1 entry-toggle">
             {{ expanded[entry.ticket] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
           </v-icon>
-          <div class="text-caption text-medium-emphasis entry-summary">{{ entry.summary }}</div>
+          <div class="text-body-small text-medium-emphasis entry-summary">{{ entry.summary }}</div>
         </div>
 
         <v-text-field
@@ -329,7 +329,7 @@ async function onAdd () {
       <div v-if="expanded[entry.ticket]" class="entry-detail px-4 pb-3">
         <div v-for="w in entry.worklogs" :key="w.id" class="detail-row">
           <div class="detail-head">
-            <div class="detail-meta text-caption text-medium-emphasis">
+            <div class="detail-meta text-body-small text-medium-emphasis">
               {{ w.started }} · {{ w.hours }}h
             </div>
             <div class="detail-actions">

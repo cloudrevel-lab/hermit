@@ -95,12 +95,12 @@ function statusColor (issue) {
           {{ sourceBranch }}
           <v-tooltip activator="parent" location="top" max-width="420">
             <div class="font-weight-medium">merged from {{ sourceBranch }}</div>
-            <div v-if="pullRequest" class="text-caption mt-1">
+            <div v-if="pullRequest" class="text-body-small mt-1">
               PR {{ pullRequest.pullRequestId }} into {{ pullRequest.targetBranch }}
               <template v-if="pullRequest.createdBy"> · {{ pullRequest.createdBy }}</template>
             </div>
-            <div v-if="pullRequest?.title" class="text-caption">{{ pullRequest.title }}</div>
-            <div v-if="otherPullRequests.length" class="text-caption mt-1">
+            <div v-if="pullRequest?.title" class="text-body-small">{{ pullRequest.title }}</div>
+            <div v-if="otherPullRequests.length" class="text-body-small mt-1">
               also in {{ otherPullRequests.map(p => `PR ${p.pullRequestId} → ${p.targetBranch}`).join(', ') }}
             </div>
           </v-tooltip>
@@ -141,14 +141,14 @@ function statusColor (issue) {
           {{ key }}
           <v-tooltip v-if="issues[key]" activator="parent" location="top" max-width="380">
             <div class="font-weight-medium">{{ issues[key].summary }}</div>
-            <div class="text-caption">{{ issues[key].type }} · {{ issues[key].status }}<template v-if="issues[key].assignee"> · {{ issues[key].assignee }}</template></div>
+            <div class="text-body-small">{{ issues[key].type }} · {{ issues[key].status }}<template v-if="issues[key].assignee"> · {{ issues[key].assignee }}</template></div>
           </v-tooltip>
         </v-chip>
       </div>
 
       <details v-if="body" class="mt-1">
-        <summary class="text-caption text-medium-emphasis" style="cursor: pointer">Message body</summary>
-        <pre class="mono text-caption mt-1 mb-0" style="white-space: pre-wrap">{{ body }}</pre>
+        <summary class="text-body-small text-medium-emphasis" style="cursor: pointer">Message body</summary>
+        <pre class="mono text-body-small mt-1 mb-0" style="white-space: pre-wrap">{{ body }}</pre>
       </details>
     </div>
   </div>

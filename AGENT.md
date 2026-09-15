@@ -458,6 +458,15 @@ defaults live in `plugins/vuetify.js`, so prefer setting a default there over
 repeating props. Colours come from the theme; do not hard-code hex values in
 components.
 
+**Type scale is Material 3, not Vuetify 3.** Vuetify 4 removed the old
+utilities, so `text-h4`, `text-subtitle-2`, `text-body-2`, `text-caption` and
+friends are **no-ops** — they silently render at the inherited size. Use
+`text-headline-*`, `text-title-*`, `text-body-*` and `text-label-*`
+(`-large`/`-medium`/`-small`) instead. The migration mapped `h4→headline-large`,
+`h5→headline-small`, `h6→title-large`, `subtitle-1→title-medium`,
+`subtitle-2→title-small`, `body-1→body-large`, `body-2→body-medium`,
+`caption→body-small`.
+
 **Dependencies.** Deliberately few. `express` and `lowdb` are the only runtime
 deps; everything the browser needs is a devDependency because Vite bundles it
 into `web/dist/`, which is what ships. `markdown-it` and `dompurify` are there

@@ -398,12 +398,12 @@ onActivated(() => {
     <v-row v-else-if="result" dense>
       <v-col v-for="side in sides" :key="side.key" cols="12" md="6">
         <v-card class="h-100 d-flex flex-column">
-          <v-card-title class="text-subtitle-2 d-flex align-center ga-2 flex-wrap">
+          <v-card-title class="text-title-small d-flex align-center ga-2 flex-wrap">
             <v-chip size="small" variant="tonal" class="branch-chip"
                     :color="side.key === 'left' ? undefined : 'primary'">
               {{ result[side.key].ref }}
             </v-chip>
-            <span class="text-caption text-medium-emphasis">
+            <span class="text-body-small text-medium-emphasis">
               {{ result[side.key].commits.length }} commits not on the other side
             </span>
           </v-card-title>
@@ -427,7 +427,7 @@ onActivated(() => {
           </div>
           <v-divider />
 
-          <div v-if="!result[side.key].commits.length" class="pa-6 text-center text-body-2 text-medium-emphasis">
+          <div v-if="!result[side.key].commits.length" class="pa-6 text-center text-body-medium text-medium-emphasis">
             Nothing here that the other branch is missing.
           </div>
           <div v-else class="scroll-pane flex-1-1" style="max-height: 620px">
@@ -449,7 +449,7 @@ onActivated(() => {
     <!-- Apply dialog -->
     <v-dialog :model-value="Boolean(applyDialog)" max-width="720" @update:model-value="applyDialog = null">
       <v-card v-if="applyDialog">
-        <v-card-title class="text-subtitle-1">
+        <v-card-title class="text-title-medium">
           Apply {{ applyDialog.commits.length }} commit(s) onto
           <span class="mono">{{ applyDialog.ontoRef }}</span>
         </v-card-title>
@@ -468,8 +468,8 @@ onActivated(() => {
                        :value="mode.value" :disabled="mode.disabled">
                 <template #label>
                   <div>
-                    <div class="text-body-2">{{ mode.title }}</div>
-                    <div class="text-caption text-medium-emphasis">
+                    <div class="text-body-medium">{{ mode.title }}</div>
+                    <div class="text-body-small text-medium-emphasis">
                       {{ mode.disabled ? mode.disabledHint : mode.subtitle }}
                     </div>
                   </div>
@@ -489,7 +489,7 @@ onActivated(() => {
             <div class="section-label mb-2">Commits, oldest first</div>
             <v-card variant="tonal" class="scroll-pane" style="max-height: 200px">
               <div v-for="commit in applyDialog.commits" :key="commit.commitId"
-                   class="px-3 py-1 text-body-2 d-flex ga-2">
+                   class="px-3 py-1 text-body-medium d-flex ga-2">
                 <span class="sha">{{ commit.shortId }}</span>
                 <span class="text-truncate">{{ commit.message.split('\n')[0] }}</span>
               </div>
@@ -502,7 +502,7 @@ onActivated(() => {
               <v-spacer />
               <v-btn size="x-small" variant="text" prepend-icon="mdi-content-copy" @click="copyCommands">Copy</v-btn>
             </div>
-            <pre class="mono text-caption pa-3 rounded" style="background: rgba(127,145,190,0.12); white-space: pre-wrap">{{ gitCommands }}</pre>
+            <pre class="mono text-body-small pa-3 rounded" style="background: rgba(127,145,190,0.12); white-space: pre-wrap">{{ gitCommands }}</pre>
           </div>
         </v-card-text>
         <v-divider />
