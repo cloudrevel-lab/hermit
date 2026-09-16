@@ -17,6 +17,11 @@ const target = ref(null)
 const base = ref(null)
 const filter = ref('')
 const jira = ref({ loading: false, version: null, issues: [], byKey: {}, host: '' })
+// Fix Versions pinned on the Jira releases page, offered here so a cross-check
+// does not depend on pasting a version-report URL.
+const pinnedReleases = ref([])
+const pinnedReleaseId = ref(null)
+const pinnedLoading = ref(false)
 const settings = ref({})
 // Set only when the comparison on screen came from a stored snapshot rather
 // than a live fetch, so the page can say so and offer a recompute.
@@ -41,6 +46,16 @@ const releaseOptions = computed(() => releases.value.map(r => ({
   value: r.version,
   subtitle: `${r.repos.length} of ${repos.value.length} repos`,
   missing: r.missing.length
+})))
+
+// Pinned Fix Versions are stored by name, so the id is what identifies the pick
+// and the label is what carries the meaning.
+const pinnedReleaseOptions = computed(() => pinnedReleases.value.map(r => ({
+  title: r.name,
+  value: r.id,
+  // Vuetify spreads an item's `props` onto the rendered list item; a top-level
+  // subtitle is ignored, so the project key has to travel this way.
+  props: r.projectKey ? { subtitle: r.projectKey } : {}
 })))
 
 /** Semver releases only, so "the previous release" skips date/ticket branches. */
@@ -72,6 +87,26 @@ function restoreSelection (releases) {
   if (stored?.base && available.has(stored.base) && stored.base !== target.value) base.value = stored.base
 }
 
+/**
+ * Refreshes the pinned Fix Version list. Best-effort: the URL field still works
+ * if this fails, so a listing error is not worth interrupting the user for.
+ */
+async function loadPinnedReleases () {
+  pinnedLoading.value = true
+  try {
+    const { releases: pinned } = await api.jiraReleases()
+    pinnedReleases.value = pinned || []
+    // A since-unpinned release must not stay selected.
+    if (pinnedReleaseId.value && !pinnedReleases.value.some(r => r.id === pinnedReleaseId.value)) {
+      pinnedReleaseId.value = null
+    }
+  } catch {
+    // Ignored on purpose — see above.
+  } finally {
+    pinnedLoading.value = false
+  }
+}
+
 watch([base, target], ([nextBase, nextTarget]) => {
   if (nextBase && nextTarget) writeStored(SELECTION_KEY, { base: nextBase, target: nextTarget })
 })
@@ -94,6 +129,7 @@ async function load (refresh = false) {
   } finally {
     loading.value = false
   }
+  loadPinnedReleases()
 }
 
 /**
@@ -107,6 +143,7 @@ function restoreCachedComparison () {
   if (!cached) return
   comparison.value = cached.data.comparison
   jiraVersionUrl.value = cached.data.jiraVersionUrl || ''
+  pinnedReleaseId.value = cached.data.pinnedReleaseId || null
   jira.value = { ...cached.data.jira, loading: false }
   restoredAt.value = cached.fetchedAt
 }
@@ -128,6 +165,7 @@ async function refreshOverview () {
   } catch {
     // The data already on screen is still usable; the user can hit Refresh.
   }
+  loadPinnedReleases()
 }
 
 async function runCompare (refresh = false) {
@@ -143,14 +181,8 @@ async function runCompare (refresh = false) {
       repoIds: selectedRepoIds.value,
       refresh
     })
-    await loadJira()
-    if (key) {
-      writeCachedResult(key, {
-        comparison: comparison.value,
-        jiraVersionUrl: jiraVersionUrl.value,
-        jira: jira.value
-      })
-    }
+    await loadJira(key)
+    cacheComparison(key)
   } catch (err) {
     notifyError(err)
   } finally {
@@ -158,19 +190,45 @@ async function runCompare (refresh = false) {
   }
 }
 
-/** Enriches commit issue keys and cross-checks them against the Jira release. */
-async function loadJira () {
+/**
+ * Persists the comparison together with whatever cross-check is on screen, so
+ * leaving the page and coming back (or reloading) does not ask for the same
+ * Jira lookup again. Writes under `key` when given, because a compare captures
+ * its key before awaiting and the selection can move while it is in flight.
+ */
+function cacheComparison (key = compareKey.value) {
+  if (!comparison.value) return
+  writeCachedResult(key, {
+    comparison: comparison.value,
+    jiraVersionUrl: jiraVersionUrl.value,
+    pinnedReleaseId: pinnedReleaseId.value,
+    jira: jira.value
+  })
+}
+
+/**
+ * Enriches commit issue keys and cross-checks them against the Jira release.
+ * The release comes from the pinned picker or a pasted release-report URL; a
+ * pinned release is looked up by id through its own endpoint, so no URL is
+ * needed and the version metadata comes back with the issues.
+ */
+async function loadJira (key = compareKey.value) {
   const keys = [...commitKeys.value]
-  if (!keys.length) return
-  if (!settings.value.jiraBaseUrl) return
+  const pinned = Boolean(pinnedReleaseId.value)
+  if (!keys.length && !pinned) return
+  if (!settings.value.jiraBaseUrl && !pinned) return
   jira.value.loading = true
   try {
     const [issuesRes, versionRes] = await Promise.all([
-      api.jiraIssues({ keys }),
+      // Issue-key enrichment needs a configured site; the version side can
+      // still resolve from the pinned release's own host without one.
+      keys.length && settings.value.jiraBaseUrl
+        ? api.jiraIssues({ keys })
+        : Promise.resolve({ host: '', issues: [] }),
       findVersion()
     ])
-    jira.value.host = issuesRes.host
-    jira.value.byKey = Object.fromEntries(issuesRes.issues.map(i => [i.key, i]))
+    jira.value.host = versionRes?.host || issuesRes.host
+    jira.value.byKey = Object.fromEntries((issuesRes.issues || []).map(i => [i.key, i]))
     jira.value.version = versionRes?.version || null
     jira.value.issues = versionRes?.issues || []
   } catch (err) {
@@ -178,13 +236,34 @@ async function loadJira () {
   } finally {
     jira.value.loading = false
   }
+  // A standalone cross-check (pinned pick or the button) has to persist too —
+  // not just the one that ran as part of Compare.
+  cacheComparison(key)
 }
 
 const jiraVersionUrl = ref('')
 
+/** Resolves the release to compare against, from the pinned pick or the URL. */
 async function findVersion () {
+  if (pinnedReleaseId.value) {
+    const pinned = await api.jiraReleaseIssues(pinnedReleaseId.value)
+    return {
+      host: pinned.host,
+      // A pinned name with no matching project version has no metadata.
+      version: pinned.meta || { name: pinned.release?.name || '', releaseDate: null },
+      issues: pinned.issues || []
+    }
+  }
   if (!jiraVersionUrl.value) return null
   return api.jiraVersion({ url: jiraVersionUrl.value })
+}
+
+/** Picking a pinned release is itself the cross-check when one is on screen. */
+function onJiraReleasePicked () {
+  // The picked id has to reach the ref before findVersion reads it.
+  nextTick(() => {
+    if (comparison.value && !comparing.value) loadJira()
+  })
 }
 
 const allCommits = computed(() =>
@@ -448,22 +527,44 @@ onActivated(() => {
           <v-icon icon="mdi-jira" size="18" /> Jira cross-check
           <v-spacer />
           <v-chip v-if="jira.version" size="small" variant="tonal" color="info">
-            {{ jira.version.name }} · due {{ shortDate(jira.version.releaseDate) }}
+            {{ jira.version.name }}
+            <template v-if="jira.version.releaseDate"> · due {{ shortDate(jira.version.releaseDate) }}</template>
           </v-chip>
         </v-card-title>
         <v-divider />
         <v-card-text>
           <v-row dense align="center" class="mb-2">
-            <v-col cols="12" md="9">
+            <v-col cols="12" md="5">
+              <div class="d-flex align-start ga-1">
+                <v-select
+                  v-model="pinnedReleaseId"
+                  :items="pinnedReleaseOptions"
+                  label="Pinned Jira release"
+                  prepend-inner-icon="mdi-bookmark-outline"
+                  :loading="pinnedLoading"
+                  no-data-text="No pinned releases — pin one on the Jira releases page"
+                  clearable
+                  class="flex-grow-1"
+                  @update:model-value="onJiraReleasePicked"
+                />
+                <v-btn icon variant="text" size="small" class="mt-1">
+                  <v-icon icon="mdi-information-outline" size="18" class="text-medium-emphasis" />
+                  <v-tooltip activator="parent" location="top" max-width="380">
+                    Pin a Fix Version on the Jira releases page, then choose it here — no release URL to copy or paste.
+                  </v-tooltip>
+                </v-btn>
+              </div>
+            </v-col>
+            <v-col cols="12" md="4">
               <v-text-field
                 v-model="jiraVersionUrl"
                 label="Jira release URL (optional)"
-                placeholder="https://your-site.atlassian.net/projects/PROJ/versions/1234/tab/release-report-all-issues"
+                placeholder="https://your-site.atlassian.net/projects/PROJ/versions/1234/..."
                 prepend-inner-icon="mdi-link-variant"
               />
             </v-col>
             <v-col cols="12" md="3">
-              <v-btn block variant="tonal" :loading="jira.loading" prepend-icon="mdi-sync" @click="loadJira">
+              <v-btn block variant="tonal" :loading="jira.loading" prepend-icon="mdi-sync" @click="loadJira()">
                 Cross-check
               </v-btn>
             </v-col>
@@ -473,7 +574,7 @@ onActivated(() => {
             Set a Jira base URL in Settings to resolve issue keys found in commit messages.
           </v-alert>
 
-          <v-row v-else-if="jira.version" dense class="mt-1">
+          <v-row v-if="jira.version" dense class="mt-1">
             <v-col cols="12" md="6">
               <div class="section-label mb-2">In Jira release, no commit found ({{ jiraOnly.length }})</div>
               <div v-if="!jiraOnly.length" class="text-body-medium text-medium-emphasis">Every issue has a matching commit.</div>
@@ -495,6 +596,12 @@ onActivated(() => {
                 <v-chip v-for="key in commitsOnly" :key="key" size="small" variant="tonal" color="error"
                         :href="jira.byKey[key]?.url" target="_blank" rel="noopener" class="mono">
                   {{ key }}
+                  <!-- A key parsed out of a commit may not exist in Jira; only
+                       show the detail when the lookup actually found an issue. -->
+                  <v-tooltip v-if="jira.byKey[key]" activator="parent" location="top" max-width="380">
+                    <div class="font-weight-medium">{{ jira.byKey[key].summary }}</div>
+                    <div class="text-body-small">{{ jira.byKey[key].status }}</div>
+                  </v-tooltip>
                 </v-chip>
               </div>
             </v-col>

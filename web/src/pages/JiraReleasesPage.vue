@@ -160,6 +160,31 @@ function openIssue (issue) {
   window.open(issue.url, '_blank', 'noopener')
 }
 
+/** The site a pinned release belongs to; older records may predate `host`. */
+function releaseHost (release) {
+  if (release.host) return release.host
+  const raw = settings.value.jiraBaseUrl
+  if (!raw) return ''
+  try {
+    return new URL(raw.includes('://') ? raw : `https://${raw}`).host
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Jira addresses a release page by numeric version id, which a pinned name
+ * does not carry, so open the issue navigator filtered to the Fix Version
+ * instead. The name is quoted and escaped exactly as the server's
+ * `jqlString()` does, or a name with spaces or parentheses is malformed JQL.
+ */
+function jiraReleaseUrl (release) {
+  const host = releaseHost(release)
+  if (!host) return undefined
+  const name = String(release.name).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  return `https://${host}/issues/?jql=${encodeURIComponent(`fixVersion = "${name}"`)}`
+}
+
 function copyKeys () {
   navigator.clipboard.writeText(issues.value.map(i => i.key).join('\n'))
     .then(() => notify(`Copied ${issues.value.length} issue keys`))
@@ -246,6 +271,17 @@ onActivated(() => {
                 {{ release.projectKey }}
               </v-list-item-subtitle>
               <template #append>
+                <v-btn
+                  size="x-small"
+                  variant="text"
+                  icon="mdi-open-in-new"
+                  color="primary"
+                  :href="jiraReleaseUrl(release)"
+                  target="_blank"
+                  rel="noopener"
+                  title="Open this Fix Version in Jira"
+                  @click.stop
+                />
                 <v-btn size="x-small" variant="text" icon="mdi-close" color="error"
                        @click.stop="confirmDelete = release" />
               </template>
