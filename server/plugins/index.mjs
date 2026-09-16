@@ -41,7 +41,7 @@ async function discover () {
       console.error(`[plugins] ${entry.name} is missing: ${missing.join(', ')}`)
       continue
     }
-    plugin.capabilities = { pullRequests: false, diffCounts: false, cherryPick: false, pullRequestWrites: false, ...plugin.capabilities }
+    plugin.capabilities = { pullRequests: false, diffCounts: false, cherryPick: false, pullRequestWrites: false, mergeRefs: false, ...plugin.capabilities }
     plugins.set(plugin.id, plugin)
   }
 

@@ -11,6 +11,7 @@ const settings = ref({
   issueKeyPattern: '',
   allowCherryPickWrites: false,
   allowCherryPickAutoComplete: false,
+  allowCherryPickDirectMerge: false,
   timezone: '',
   timeLoggerSite: '',
   timeLoggerProject: '',
@@ -524,6 +525,24 @@ onMounted(load)
           The commits still go through a pull request and a merge commit, so there is a record and it
           can be reverted, but nobody reviews it first. Leave this off if the target branch is one
           other people work on.
+        </div>
+
+        <v-divider class="my-4" />
+
+        <v-switch
+          v-model="settings.allowCherryPickDirectMerge"
+          color="warning"
+          inset
+          hide-details
+          :disabled="!settings.allowCherryPickWrites"
+          label="Merge branches directly into the target branch"
+        />
+        <div class="text-body-medium text-medium-emphasis mt-2">
+          Merges a <strong>whole source branch</strong> into the target with its original commit ids,
+          and <strong>no pull request or review</strong>. When the target is behind the source it
+          fast-forwards with no merge commit; when the branches have diverged it adds one merge
+          commit. Existing commits are never rewritten, but branch policies are bypassed. This is the
+          riskiest write in the app — leave it off unless the branch is yours alone.
         </div>
       </v-card-text>
     </v-card>

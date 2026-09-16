@@ -43,6 +43,7 @@ export const api = {
   compare: (payload) => call('/git/compare', { method: 'POST', body: payload }),
   compareRefs: (payload) => call('/git/compare-refs', { method: 'POST', body: payload }),
   cherryPick: (payload) => call('/git/cherry-pick', { method: 'POST', body: payload }),
+  mergeBranches: (payload) => call('/git/merge-branches', { method: 'POST', body: payload }),
 
   jiraVersion: (payload) => call('/jira/version', { method: 'POST', body: payload }),
   jiraProjectVersions: (refresh) => call(`/jira/versions${refresh ? '?refresh=1' : ''}`),

@@ -358,9 +358,32 @@ git push -u origin cherry-pick/release-1.2.2-mts380e1
 Turning on **Allow cherry-pick writes** in Settings lets the console ask the
 provider to apply them for you — where the provider supports it. Azure DevOps
 does; **GitHub has no cherry-pick API**, so GitHub repos always show the
-commands instead, and the page says so. Either way the commits land on a **new topic
-branch** — the target branch is never rewritten — and you still raise the pull
-request yourself.
+commands instead, and the page says so.
+
+The cherry-pick options always land the commits on a **new topic branch** first,
+so existing history is never rewritten. The dialog's **How far to take it**
+choice then decides where they stop; the last option is different, merging a
+whole branch instead of cherry-picking:
+
+| Option | What it does |
+| --- | --- |
+| Merge into the target branch | Opens a pull request and completes it once policies pass |
+| Open a pull request, leave it to review | Creates the PR but does not complete it |
+| Topic branch only | Stops at the new branch; you raise the pull request yourself |
+| Merge the source branch into the target | Merges the whole source branch, keeping the original commit ids — no pull request |
+
+The source-branch merge is the only option that skips the pull request, so it is
+a separate opt-in (**Merge branches directly into the target branch** in
+Settings) and bypasses branch policies. It merges the **whole** source branch —
+select every commit on that side to use it. When the target is behind the source
+it fast-forwards with no merge commit; when the branches have diverged Azure
+builds one merge commit. Either way the original commits keep their ids, so the
+comparison no longer reports them as missing.
+
+Every dialog also has a **Prompt for an AI tool** section: a ready-to-paste
+brief naming the repository, the source and target branches and the exact
+commits, for when you would rather have an AI agent (or yourself) run the merge
+locally.
 
 ### 6. Log your time
 
@@ -420,6 +443,7 @@ settings above. The working day defaults to 8h and new worklogs are stamped at
 | Default project key | — | Project for issue lookups and the Fix Version picker |
 | Allow cherry-pick writes | off | Lets Azure DevOps apply selected commits; GitHub is always manual |
 | Complete the cherry-pick pull request | off | Auto-completes that PR; requires writes on |
+| Merge branches directly into the target branch | off | Merges a whole source branch in place, keeping commit ids; requires writes on |
 | Time logger site | Jira base URL | Site whose worklogs the Time logger reads and writes |
 | Time logger project key | default project key | Project scanned for your logged time |
 | Time logger hours per day | `8` | Capacity basis; `0` follows Jira's own setting |

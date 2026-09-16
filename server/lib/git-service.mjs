@@ -258,3 +258,30 @@ export async function cherryPick ({ repoId, commitIds, ontoRef, topicBranch, mod
     }
   }
 }
+
+/**
+ * Merges a whole source branch into the target with a real merge, so the source
+ * commits keep their ids and stop showing as "missing". Fast-forwards when the
+ * target is behind and otherwise asks the provider for one merge commit; either
+ * way no pull request is created.
+ */
+export async function mergeSourceBranch ({ repoId, sourceRef, targetRef }) {
+  const { repo, plugin } = await repoWithPlugin(repoId)
+  if (!plugin.capabilities.mergeRefs || typeof plugin.mergeSourceInto !== 'function') {
+    const err = new Error(`${plugin.name} cannot merge branches directly`)
+    err.status = 400
+    err.hint = 'Open a pull request instead, or run the merge locally with the git commands in the dialog.'
+    throw err
+  }
+  if (!sourceRef || !targetRef || sourceRef === targetRef) {
+    const err = new Error('Pick two different branches to merge')
+    err.status = 400
+    throw err
+  }
+  const result = await plugin.mergeSourceInto(repo.coords, {
+    sourceRef,
+    targetRef,
+    comment: `Merge ${sourceRef} into ${targetRef}`
+  })
+  return { sourceRef, targetRef, ...result }
+}

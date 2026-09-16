@@ -27,6 +27,8 @@ const lastResult = ref(null)
 const activeRepo = computed(() => repos.value.find(r => r.id === repoId.value) || null)
 // Some providers (GitHub) have no cherry-pick endpoint at all.
 const providerCanCherryPick = computed(() => activeRepo.value?.capabilities?.cherryPick ?? false)
+// A provider can only move the target ref if it declares the ref-update capability.
+const providerCanMerge = computed(() => activeRepo.value?.capabilities?.mergeRefs ?? false)
 const writesAllowed = computed(() => settings.value.allowCherryPickWrites && providerCanCherryPick.value)
 
 /** Identifies the comparison by the exact repo and ref pair it was run for. */
@@ -51,8 +53,9 @@ const applying = ref(false)
 const topicBranch = ref('')
 const landMode = ref('auto')
 
-// How far the console carries the commits. They always reach a topic branch
-// first; the rest is what Azure's API cannot do in one step.
+// How far the console carries the commits. The cherry-pick modes land them on a
+// topic branch first; "source" merges the whole branch instead, which keeps the
+// original commit ids.
 const landModes = computed(() => [
   {
     value: 'auto',
@@ -72,6 +75,17 @@ const landModes = computed(() => [
     title: 'Topic branch only',
     subtitle: 'You raise the pull request yourself',
     disabled: false
+  },
+  {
+    value: 'source',
+    title: 'Merge the source branch into the target',
+    subtitle: `Merges ${applyDialog.value?.fromRef || 'the source'} into ${applyDialog.value?.ontoRef || 'the target'} — the commit ids stay the same and no pull request is created`,
+    disabled: !settings.value.allowCherryPickDirectMerge || !providerCanMerge.value || !applyDialog.value?.allFromSelected,
+    disabledHint: !providerCanMerge.value
+      ? 'The provider cannot merge branches directly'
+      : !applyDialog.value?.allFromSelected
+        ? 'Select all commits on this side — this mode merges the whole source branch'
+        : 'Enable "Merge branches directly into the target branch" in Settings'
   }
 ])
 
@@ -213,7 +227,8 @@ function openApply (from) {
   const commits = (result.value[from].commits || []).filter(c => ids.includes(c.commitId))
   // Azure applies commits in the order given; oldest first matches git's behaviour.
   const ordered = [...commits].reverse()
-  applyDialog.value = { from, to, ontoRef: result.value[to].ref, commits: ordered }
+  const allFromSelected = ids.length === (result.value[from].commits || []).length
+  applyDialog.value = { from, to, fromRef: result.value[from].ref, ontoRef: result.value[to].ref, commits: ordered, allFromSelected }
   topicBranch.value = `cherry-pick/${result.value[to].ref.replace(/[^\w.-]+/g, '-')}-${Date.now().toString(36)}`
   landMode.value = settings.value.allowCherryPickAutoComplete ? 'auto' : 'pr'
 }
@@ -221,6 +236,17 @@ function openApply (from) {
 const gitCommands = computed(() => {
   const dialog = applyDialog.value
   if (!dialog) return ''
+  // A real branch merge keeps the commits' ids, so it works on the branch, not
+  // a topic branch of cherry-picked copies.
+  if (landMode.value === 'source') {
+    return [
+      `git fetch origin`,
+      `git switch ${dialog.ontoRef}`,
+      `git pull --ff-only`,
+      `git merge ${dialog.fromRef}`,
+      `git push origin ${dialog.ontoRef}`
+    ].join('\n')
+  }
   const lines = [
     `git fetch origin`,
     `git switch -c ${topicBranch.value} origin/${dialog.ontoRef}`,
@@ -239,6 +265,82 @@ const gitCommands = computed(() => {
   return lines.join('\n')
 })
 
+/**
+ * A self-contained brief for an AI coding tool (or a person) to run the same
+ * move locally: which branches, which commits, and what "done" means for the
+ * chosen land mode.
+ */
+const mergePrompt = computed(() => {
+  const dialog = applyDialog.value
+  if (!dialog) return ''
+  const repo = activeRepo.value
+  const shas = dialog.commits.map(c => c.commitId).join(' ')
+  const commitLines = dialog.commits.map(c => `- ${c.commitId} ${c.message.split('\n')[0]}`)
+
+  const goals = {
+    source: `Merge the whole branch "${dialog.fromRef}" into "${dialog.ontoRef}", preserving the original commit ids.`,
+    auto: `Apply these commits onto "${dialog.ontoRef}" through a pull request from "${topicBranch.value}", and complete that pull request.`,
+    pr: `Apply these commits onto a new branch "${topicBranch.value}" and open a pull request from it into "${dialog.ontoRef}".`,
+    branch: `Apply these commits onto a new branch "${topicBranch.value}" and push it, without opening a pull request.`
+  }
+
+  const steps = landMode.value === 'source'
+    ? [
+        `2. git switch ${dialog.ontoRef} && git pull --ff-only`,
+        `3. git merge ${dialog.fromRef}`,
+        '4. Resolve any conflicts and commit the merge, if one is created.',
+        `5. git push origin ${dialog.ontoRef}`
+      ]
+    : [
+        `2. git switch -c ${topicBranch.value} origin/${dialog.ontoRef}`,
+        `3. git cherry-pick ${shas}`,
+        '4. Resolve any conflicts commit by commit, keeping the intent of each change.',
+        `5. git push -u origin ${topicBranch.value}`,
+        landMode.value === 'branch'
+          ? '6. Stop there; do not open a pull request.'
+          : `6. Open a pull request from ${topicBranch.value} into ${dialog.ontoRef}.`
+      ]
+
+  const rules = landMode.value === 'source'
+    ? [
+        '- Do not cherry-pick, rebase or squash: the source commits must keep their ids.',
+        `- Do not force-push or rewrite history that is already on ${dialog.ontoRef}.`,
+        '- Report any conflict you could not resolve instead of guessing.'
+      ]
+    : [
+        `- Do not force-push or rewrite history that is already on ${dialog.ontoRef}.`,
+        '- Cherry-picking creates new commit ids on the target; that is expected.',
+        '- Keep each commit separate and preserve its intent when resolving conflicts.',
+        '- If a commit is already on the target, skip it and say so rather than duplicating it.',
+        '- Report any conflict you could not resolve instead of guessing.'
+      ]
+
+  return [
+    'You are moving commits between branches of a git repository.',
+    '',
+    `Repository: ${repo?.url || repo?.name || 'the repository'}`,
+    `Source branch (the commits come from): ${dialog.fromRef}`,
+    `Target branch (the commits go to): ${dialog.ontoRef}`,
+    `Goal: ${goals[landMode.value] || goals.branch}`,
+    '',
+    `Commits to apply (${dialog.commits.length}), oldest first:`,
+    ...commitLines,
+    '',
+    'Steps:',
+    '1. git fetch origin',
+    ...steps,
+    '',
+    'Rules:',
+    ...rules
+  ].join('\n')
+})
+
+function copyPrompt () {
+  navigator.clipboard.writeText(mergePrompt.value)
+    .then(() => notify('Prompt copied'))
+    .catch(() => notify('Could not access the clipboard', { color: 'error' }))
+}
+
 function copyCommands () {
   navigator.clipboard.writeText(gitCommands.value)
     .then(() => notify('git commands copied'))
@@ -249,6 +351,29 @@ async function applyViaApi () {
   applying.value = true
   try {
     const ontoRef = applyDialog.value.ontoRef
+    const sourceRef = applyDialog.value.fromRef
+
+    // A real branch merge is a different operation: it never cherry-picks and
+    // keeps the source commits' ids, so it goes to its own endpoint.
+    if (landMode.value === 'source') {
+      const res = await api.mergeBranches({ repoId: repoId.value, sourceRef, targetRef: ontoRef })
+      if (res.strategy === 'fast-forward') {
+        notify(`Fast-forwarded ${ontoRef} to ${sourceRef}`, {
+          hint: 'No merge commit was needed. The commits keep their ids, so they no longer show as missing.'
+        })
+      } else if (res.strategy === 'merge-commit') {
+        notify(`Merged ${sourceRef} into ${ontoRef}`, {
+          hint: `The source commits keep their ids; one merge commit (${res.mergeCommitId.slice(0, 8)}) was added.`
+        })
+      } else {
+        notify(`${sourceRef} is already contained in ${ontoRef}`)
+      }
+      lastResult.value = res
+      applyDialog.value = null
+      await compare(true)
+      return
+    }
+
     const res = await api.cherryPick({
       repoId: repoId.value,
       commitIds: applyDialog.value.commits.map(c => c.commitId),
@@ -377,6 +502,20 @@ onActivated(() => {
       </div>
     </v-alert>
 
+    <v-alert v-if="lastResult?.strategy" type="success" density="compact" class="mb-4"
+             closable @click:close="lastResult = null">
+      <div class="d-flex align-center ga-3 flex-wrap">
+        <span>
+          <template v-if="lastResult.strategy === 'fast-forward'">Fast-forwarded</template>
+          <template v-else-if="lastResult.strategy === 'merge-commit'">Merged</template>
+          <template v-else>Already merged</template>
+          <span class="mono">{{ lastResult.sourceRef }}</span> into
+          <span class="mono">{{ lastResult.targetRef }}</span>
+          <template v-if="lastResult.mergeCommitId"> — merge commit {{ lastResult.mergeCommitId.slice(0, 8) }}</template>
+        </span>
+      </div>
+    </v-alert>
+
     <v-alert v-if="restoredAt && result" type="info" density="compact" variant="tonal" class="mb-4">
       <div class="d-flex align-center ga-3 flex-wrap">
         <span>Showing the last comparison from cache ({{ relativeTime(restoredAt) }}).</span>
@@ -456,9 +595,10 @@ onActivated(() => {
         <v-divider />
         <v-card-text class="d-flex flex-column ga-4">
           <v-alert v-if="providerCanCherryPick" type="info" density="compact">
-            Azure can only cherry-pick onto a <strong>new topic branch</strong>, so the commits land
-            there first and reach <span class="mono">{{ applyDialog.ontoRef }}</span> through a pull
-            request. Nothing is force-pushed and the target branch is never rewritten.
+            Azure can only cherry-pick onto a <strong>new topic branch</strong>, so the cherry-pick
+            modes land the commits there first. How they reach
+            <span class="mono">{{ applyDialog.ontoRef }}</span> is the choice below; nothing is
+            force-pushed and existing history is never rewritten.
           </v-alert>
 
           <div v-if="providerCanCherryPick">
@@ -483,7 +623,16 @@ onActivated(() => {
             <span class="mono">{{ applyDialog.ontoRef }}</span>.
           </v-alert>
 
-          <v-text-field v-model="topicBranch" label="New topic branch" prepend-inner-icon="mdi-source-branch-plus" />
+          <v-alert v-if="landMode === 'source'" type="warning" density="compact">
+            <strong>No pull request and no review.</strong> The whole source branch is merged, so any
+            commit it has that <span class="mono">{{ applyDialog.ontoRef }}</span> lacks comes along.
+            The commit ids are preserved — when the branches have diverged this adds one merge commit,
+            otherwise <span class="mono">{{ applyDialog.ontoRef }}</span> fast-forwards. Branch
+            policies are bypassed.
+          </v-alert>
+
+          <v-text-field v-if="landMode !== 'source'" v-model="topicBranch"
+                        label="New topic branch" prepend-inner-icon="mdi-source-branch-plus" />
 
           <div>
             <div class="section-label mb-2">Commits, oldest first</div>
@@ -504,6 +653,15 @@ onActivated(() => {
             </div>
             <pre class="mono text-body-small pa-3 rounded" style="background: rgba(127,145,190,0.12); white-space: pre-wrap">{{ gitCommands }}</pre>
           </div>
+
+          <div>
+            <div class="d-flex align-center mb-2">
+              <span class="section-label">Prompt for an AI tool</span>
+              <v-spacer />
+              <v-btn size="x-small" variant="text" prepend-icon="mdi-content-copy" @click="copyPrompt">Copy</v-btn>
+            </div>
+            <pre class="mono text-body-small pa-3 rounded scroll-pane" style="background: rgba(127,145,190,0.12); white-space: pre-wrap; max-height: 220px">{{ mergePrompt }}</pre>
+          </div>
         </v-card-text>
         <v-divider />
         <v-card-actions>
@@ -515,7 +673,8 @@ onActivated(() => {
             :disabled="!writesAllowed"
             @click="applyViaApi"
           >
-            <template v-if="writesAllowed && landMode === 'auto'">Cherry-pick and merge into {{ applyDialog.ontoRef }}</template>
+            <template v-if="writesAllowed && landMode === 'source'">Merge {{ applyDialog.fromRef }} into {{ applyDialog.ontoRef }}</template>
+            <template v-else-if="writesAllowed && landMode === 'auto'">Cherry-pick and merge into {{ applyDialog.ontoRef }}</template>
             <template v-else-if="writesAllowed && landMode === 'pr'">Cherry-pick and open a PR</template>
             <template v-else-if="writesAllowed">Cherry-pick to a topic branch</template>
             <template v-else-if="!providerCanCherryPick">Not supported by {{ activeRepo?.providerName }}</template>

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, releaseOverview } from '../lib/git-service.mjs'
+import { branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, mergeSourceBranch, releaseOverview } from '../lib/git-service.mjs'
 import { getDb } from '../lib/db.mjs'
 
 export const gitRouter = Router()
@@ -65,5 +65,30 @@ gitRouter.post('/cherry-pick', async (req, res, next) => {
       })
     }
     res.json(await cherryPick({ repoId, commitIds, ontoRef, topicBranch, mode }))
+  } catch (err) { next(err) }
+})
+
+/**
+ * A real branch merge with no pull request: the source commits keep their ids,
+ * and the target fast-forwards or takes one merge commit. It writes to a target
+ * branch, so it shares the direct-merge opt-in with the write switch.
+ */
+gitRouter.post('/merge-branches', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    if (!db.data.settings.allowCherryPickWrites || !db.data.settings.allowCherryPickDirectMerge) {
+      return res.status(403).json({
+        error: 'Merging branches directly is disabled',
+        hint: 'Enable Allow cherry-pick writes and Merge branches directly into the target branch in Settings first.'
+      })
+    }
+    const { repoId, sourceRef, targetRef } = req.body || {}
+    if (!repoId || !sourceRef || !targetRef) {
+      return res.status(400).json({ error: 'repoId, sourceRef and targetRef are required' })
+    }
+    if (sourceRef === targetRef) {
+      return res.status(400).json({ error: 'Pick two different branches to merge' })
+    }
+    res.json(await mergeSourceBranch({ repoId, sourceRef, targetRef }))
   } catch (err) { next(err) }
 })

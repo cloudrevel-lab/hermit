@@ -66,7 +66,7 @@ const plugin = {
   icon: 'mdi-microsoft-azure-devops',
   color: '#0078D4',
   urlExample: 'https://dev.azure.com/{org}/{project}/_git/{repo}',
-  capabilities: { pullRequests: true, diffCounts: true, cherryPick: true, pullRequestWrites: true },
+  capabilities: { pullRequests: true, diffCounts: true, cherryPick: true, pullRequestWrites: true, mergeRefs: true },
 
   /** Any dev.azure.com or *.visualstudio.com URL that names a repo. */
   matchesUrl (url) {
@@ -145,6 +145,17 @@ const plugin = {
       continuationToken = headers.get('x-ms-continuationtoken') || undefined
     } while (continuationToken)
     return branches
+  },
+
+  /**
+   * One ref by exact name. Azure's `filter` is a prefix match, so
+   * `heads/release/1` also returns `heads/release/10`; find the exact name
+   * rather than trusting the first result.
+   */
+  async getBranchTip (coords, branch) {
+    const { payload } = await call(coords, '/refs', { filter: `heads/${branch}` })
+    const ref = (payload.value || []).find(r => r.name === `refs/heads/${branch}`)
+    return ref ? { name: branch, objectId: ref.objectId } : null
   },
 
   /**
@@ -289,6 +300,133 @@ const plugin = {
       status: 504,
       hint: `The topic branch may still appear. Last status was "${last?.status || 'unknown'}".`
     })
+  },
+
+  /** One ref update. Azure only applies it while oldObjectId still matches. */
+  async updateRef (coords, { branch, oldObjectId, newObjectId }) {
+    const { payload } = await call(coords, '/refs', {}, {
+      method: 'POST',
+      body: [{ name: `refs/heads/${branch}`, oldObjectId, newObjectId }]
+    })
+    const result = (payload.value || [])[0]
+    if (result && result.success === false) {
+      throw new ProviderError(`Azure DevOps refused to move ${branch}`, {
+        status: 409,
+        hint: result.customMessage || `The ref update was ${result.updateStatus}. Check branch permissions and locks.`
+      })
+    }
+    return result || null
+  },
+
+  /**
+   * Whether ancestorRef is already contained in descendantRef. Asking for the
+   * commits in the ancestor that the descendant lacks returns nothing exactly
+   * when the descendant descends from the ancestor.
+   */
+  async isAncestor (coords, { ancestorRef, descendantRef }) {
+    const missing = await plugin.listCommitsBetween(coords, {
+      base: descendantRef,
+      target: ancestorRef,
+      top: 1
+    })
+    return missing.length === 0
+  },
+
+  /**
+   * Asks Azure to build a real merge commit from two commits. It does not move
+   * a branch by itself; the caller updates the ref once mergeCommitId is known.
+   * parents is ordered target-first, matching `git merge`.
+   */
+  async createMergeRequest (coords, { targetRef, sourceRef, comment }) {
+    const [target, source] = await Promise.all([
+      plugin.getBranchTip(coords, targetRef),
+      plugin.getBranchTip(coords, sourceRef)
+    ])
+    if (!target) throw new ProviderError(`The target branch ${targetRef} is missing`, { status: 404 })
+    if (!source) throw new ProviderError(`The source branch ${sourceRef} is missing`, { status: 404 })
+    const { payload } = await call(coords, '/merges', {}, {
+      method: 'POST',
+      body: { parents: [target.objectId, source.objectId], comment }
+    })
+    return {
+      mergeOperationId: payload.mergeOperationId,
+      status: payload.status,
+      targetObjectId: target.objectId,
+      sourceObjectId: source.objectId
+    }
+  },
+
+  async getMergeRequest (coords, mergeOperationId) {
+    const { payload } = await call(coords, `/merges/${mergeOperationId}`)
+    return payload
+  },
+
+  /** The merge runs asynchronously; poll until it yields a merge commit. */
+  async waitForMergeRequest (coords, mergeOperationId, { timeoutMs = 90_000, intervalMs = 1500 } = {}) {
+    if (!mergeOperationId) {
+      throw new ProviderError('Azure DevOps did not return a merge id to track', {
+        hint: 'Check the repository; the merge commit may still appear.'
+      })
+    }
+    const deadline = Date.now() + timeoutMs
+    let last = null
+    while (Date.now() < deadline) {
+      last = await plugin.getMergeRequest(coords, mergeOperationId)
+      const status = String(last.status || '').toLowerCase()
+      if (status === 'completed') {
+        const mergeCommitId = last.detailedStatus?.mergeCommitId
+        if (!mergeCommitId) {
+          throw new ProviderError('Azure DevOps reported the merge completed but returned no commit id', {
+            hint: 'Check the target branch in Azure DevOps.'
+          })
+        }
+        return mergeCommitId
+      }
+      if (status === 'failed' || status === 'abandoned') {
+        throw new ProviderError(`Azure DevOps could not merge the branches (${last.status})`, {
+          status: 409,
+          hint: last.detailedStatus?.failureMessage || 'Resolve the merge locally with the git commands in the dialog.'
+        })
+      }
+      await sleep(intervalMs)
+    }
+    throw new ProviderError('Timed out waiting for Azure DevOps to finish the merge', {
+      status: 504,
+      hint: `The merge may still complete. Last status was ${last?.status || 'unknown'}.`
+    })
+  },
+
+  /**
+   * Merges sourceRef into targetRef and moves the target ref, preserving the
+   * source commits' ids. A target already containing the source is a no-op; a
+   * target that is an ancestor of the source fast-forwards with no merge
+   * commit; otherwise Azure builds one merge commit. No pull request involved.
+   */
+  async mergeSourceInto (coords, { sourceRef, targetRef, comment }) {
+    const [target, source] = await Promise.all([
+      plugin.getBranchTip(coords, targetRef),
+      plugin.getBranchTip(coords, sourceRef)
+    ])
+    if (!target) throw new ProviderError(`The target branch ${targetRef} is missing`, { status: 404 })
+    if (!source) throw new ProviderError(`The source branch ${sourceRef} is missing`, { status: 404 })
+
+    if (await plugin.isAncestor(coords, { ancestorRef: sourceRef, descendantRef: targetRef })) {
+      return { strategy: 'already-merged', targetRef, mergeCommitId: null, previousObjectId: target.objectId, objectId: target.objectId }
+    }
+
+    if (await plugin.isAncestor(coords, { ancestorRef: targetRef, descendantRef: sourceRef })) {
+      await plugin.updateRef(coords, { branch: targetRef, oldObjectId: target.objectId, newObjectId: source.objectId })
+      return { strategy: 'fast-forward', targetRef, mergeCommitId: null, previousObjectId: target.objectId, objectId: source.objectId }
+    }
+
+    const request = await plugin.createMergeRequest(coords, { targetRef, sourceRef, comment })
+    const mergeCommitId = await plugin.waitForMergeRequest(coords, request.mergeOperationId)
+    await plugin.updateRef(coords, {
+      branch: targetRef,
+      oldObjectId: request.targetObjectId,
+      newObjectId: mergeCommitId
+    })
+    return { strategy: 'merge-commit', targetRef, mergeCommitId, previousObjectId: target.objectId, objectId: mergeCommitId }
   },
 
   /** The PAT's own identity, needed to set a PR to auto-complete. */

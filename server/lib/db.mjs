@@ -43,6 +43,10 @@ const defaults = {
     // Letting the console complete the pull request merges into the target
     // branch without review, so it is a separate opt-in from the write switch.
     allowCherryPickAutoComplete: false,
+    // Fast-forwarding the target branch straight onto the picked commits skips
+    // the pull request, the review and the merge commit entirely — a third and
+    // still more deliberate opt-in.
+    allowCherryPickDirectMerge: false,
     // IANA zone name for rendering dates. Empty means the browser's own zone.
     timezone: '',
     // Time logger: the Jira site/project whose worklogs are reconciled, and the

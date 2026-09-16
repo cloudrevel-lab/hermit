@@ -46,9 +46,11 @@ port. This was an explicit requirement — never hard-code a port anywhere.
 
 **Writes are opt-in.** Repository operations are read-only except the cherry-pick
 endpoint, which is gated behind `settings.allowCherryPickWrites` (default
-`false`) and only ever creates a *new topic branch*. Keep that shape: a tool
-that reads someone's repos is safe to run; one that writes to release branches is
-not.
+`false`). By default the commits only ever reach a *new topic branch*; the modes
+that carry them further are separate opt-ins — `allowCherryPickAutoComplete` for
+completing the pull request, and `allowCherryPickDirectMerge` for merging a whole
+source branch into the target with no pull request. Keep that shape: a tool that
+reads someone's repos is safe to run; one that writes to release branches is not.
 
 The **Time logger** (below) is the one deliberate exception, and it is a
 different kind of write: it changes only the signed-in user's own Jira worklogs,
@@ -217,7 +219,8 @@ compare normally. The UI renders those under "Not compared". Preserve this.
 | POST | `/api/git/compare` | Cross-repo comparison of two release branches |
 | POST | `/api/git/compare-refs` | Two arbitrary refs in one repo, both directions |
 | GET | `/api/git/repos/:id/branches` | Branch list for one repo |
-| POST | `/api/git/cherry-pick` | Apply commits to a new topic branch. Gated, and provider must support it |
+| POST | `/api/git/cherry-pick` | Apply commits to a new topic branch, optionally via a PR. Gated, and provider must support it |
+| POST | `/api/git/merge-branches` | Merge a whole source branch into the target, keeping commit ids. Gated |
 | POST | `/api/jira/version` | Issues in a fixVersion, from a release URL or id |
 | GET | `/api/jira/versions` | Fix Versions defined on the project, for the picker |
 | GET/POST | `/api/jira/releases` | Pinned Fix Versions |
@@ -281,6 +284,26 @@ requests the query returns an empty map and the comparison still works.
 Azure DevOps serves its HTML sign-in page, often with a 200 or 203.
 `lib/http.mjs` detects a non-JSON content type and converts it into a 401 with
 a useful hint. Every provider call must go through `requestJson()` to inherit it.
+
+### Azure: a real branch merge is a merge operation plus a ref update
+
+"Merge the source branch into the target" keeps the source commits' ids, so it
+cannot cherry-pick. Azure has no single call for it:
+
+1. `GET /refs?filter=heads/<branch>` reads both tips. The filter is a **prefix**
+   match, so match `refs/heads/<branch>` exactly.
+2. If the target is an ancestor of the source, `POST /repositories/{id}/refs`
+   fast-forwards it — no merge commit.
+3. Otherwise `POST /repositories/{id}/merges` with
+   `{ parents: [targetTip, sourceTip], comment }`, then poll
+   `GET /merges/{mergeOperationId}` until `completed`, take
+   `detailedStatus.mergeCommitId`, and ref-update the target onto it.
+
+The merge endpoint only builds the commit; it never moves a branch, so the ref
+update is always the last step. It is sparsely documented, and a conflict comes
+back as a failed operation with a `failureMessage` rather than a resolution to
+attempt, so the dialog's git commands are the fallback. The ref update bypasses
+branch policies, which is why this is its own opt-in setting.
 
 ### GitHub: no cherry-pick, and a 60/hour anonymous ceiling
 
@@ -507,18 +530,35 @@ Two rules apply when restoring:
   loaded, since changing the repo clears them; `pendingRestore` holds them
   until then.
 
-**Page result cache.** `composables/useResultCache.js` snapshots the result of
-an expensive, user-run operation — a release comparison or a two-ref compare —
-in `sessionStorage`, keyed by the exact inputs (repo, branches, repo set). A
-reload for the same inputs restores the result instead of recomputing it, and
-the page labels it "from cache" with a Recompute action. `App.vue` keeps the
-three data-heavy pages mounted with `<keep-alive :include>` so an ordinary page
-switch loses nothing at all; their `onActivated` hooks re-read only the cheap
-metadata (release overview, branch list, pinned Jira releases). This uses
-`sessionStorage` rather than `useStored`'s `localStorage` on purpose: a
-comparison can be large, and `localStorage` is the small store the remembered
-selections share. A mutation is never replayed from the cache — a cherry-pick
-is only ever restored as the result that was displayed, never re-applied.
+**State and page-result persistence.** Two layers stop a user from redoing
+work they have already done:
+
+- **While the tab is open.** `App.vue` mounts the three data-heavy pages —
+  release compare, cherry-pick and Jira releases — through
+  `<keep-alive :include>`, so an ordinary page switch keeps their whole
+  in-memory state: the comparison, the commit lists, the Jira cross-check.
+  Returning is instant. On `onActivated` each page re-reads only the cheap
+  metadata (release overview, branch list, pinned Jira releases); it never
+  refetches a result that is already on screen.
+- **Across a reload.** `composables/useResultCache.js` snapshots the result
+  of an expensive, user-run operation — a release comparison or a two-ref
+  compare — in `sessionStorage`, keyed by the exact inputs (repo, branches,
+  repo set). A reload for the same inputs restores it, and the page labels it
+  "from cache". The release-page snapshot also carries the Jira cross-check —
+  the chosen pinned Fix Version (or pasted URL) and its issues — so a
+  cross-check run from the picker or the Cross-check button is restored too,
+  not only the one that ran as part of Compare.
+
+Nothing is re-run on its own: Recompute (or the cache-bypass icon) re-runs a
+comparison, Refresh branches re-reads the release overview, Reload re-reads a
+pinned Jira release past the server cache, and Cross-check re-runs the Jira
+lookup.
+
+This uses `sessionStorage` rather than `useStored`'s `localStorage` on
+purpose: a comparison can be large, and `localStorage` is the small store the
+remembered selections share. A mutation is never replayed from the cache — a
+cherry-pick is only ever restored as the result that was displayed, never
+re-applied.
 
 **Theme persistence.** The light/dark choice is stored in `localStorage` under
 `hermit-console:theme`. It is read *before* `createVuetify` runs and passed as
@@ -557,7 +597,7 @@ export default {
   icon: 'mdi-bitbucket',        // any mdi name
   color: '#2684FF',
   urlExample: 'https://bitbucket.org/{workspace}/{repo}',
-  capabilities: { pullRequests: true, diffCounts: true, cherryPick: false },
+  capabilities: { pullRequests: true, diffCounts: true, cherryPick: false, mergeRefs: false },
 
   matchesUrl (url),             // URL object -> boolean. Cheap host test
   parseUrl (url),               // -> coords, an opaque provider-specific object
@@ -574,7 +614,9 @@ export default {
   async listCommitsBetween (coords, { base, target, top }),
   async diffCounts (coords, { base, target }),         // if capabilities.diffCounts
   async pullRequestsForCommits (coords, ids, { commits }),  // if capabilities.pullRequests
-  async createCherryPick (coords, { commitIds, ontoRef, topicBranch })  // if capabilities.cherryPick
+  async createCherryPick (coords, { commitIds, ontoRef, topicBranch }),  // if capabilities.cherryPick
+  async getBranchTip (coords, branch),                 // if capabilities.mergeRefs
+  async mergeSourceInto (coords, { sourceRef, targetRef, comment })  // if capabilities.mergeRefs
 }
 ```
 
