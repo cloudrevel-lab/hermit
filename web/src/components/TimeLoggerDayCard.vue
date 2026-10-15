@@ -1,5 +1,7 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { api } from '../api'
+import { notify } from '../composables/useToast'
 import MarkdownText from './MarkdownText.vue'
 
 // One day of the time-logger report. Ported from the old jira-tickets app,
@@ -17,6 +19,23 @@ const newTicket = ref('')
 const newHours = ref(null)
 const newComment = ref('')
 const busyKey = ref(null)
+// Typo guard: a typed key is checked against the tickets the user has logged
+// time to recently, and anything outside that set is confirmed before a write.
+// `verifiedTicket` remembers the accepted value so a later blur (or the Log
+// click) does not ask twice for the same key.
+const ticketPattern = /^[A-Za-z][A-Za-z0-9]*-\d+$/
+const verifiedTicket = ref('')
+const checkingTicket = ref(false)
+const ticketAlert = ref(null)
+const ticketResolve = ref(null)
+let checkInFlight = null
+const ticketField = ref(null)
+const hoursField = ref(null)
+
+const ticketChecked = computed(() => {
+  const key = newTicket.value.trim().toUpperCase()
+  return Boolean(key) && verifiedTicket.value === key
+})
 // Ticket -> whether its row is expanded to show worklog comments.
 const expanded = ref({})
 // Worklog id -> editable hours for that single entry, independent of the
@@ -196,14 +215,114 @@ function onCommentKey (event) {
   onAdd()
 }
 
+function focusTicket () {
+  nextTick(() => {
+    const input = ticketField.value?.$el?.querySelector('input')
+    input?.focus()
+    input?.select()
+  })
+}
+
+function focusHours () {
+  nextTick(() => hoursField.value?.focus())
+}
+
+/**
+ * Ask the user to confirm a key that is not among their recent tickets. Resolves
+ * 'continue' (write it), 'reject' (go back and fix it) or 'pick' (a suggested
+ * recent ticket took its place).
+ */
+function askTicket (verdict) {
+  return new Promise((resolve) => {
+    // Answer a question that is already open "no" rather than dropping its
+    // resolver, which would leave its caller awaiting forever.
+    const pending = ticketResolve.value
+    if (pending) pending('reject')
+    ticketAlert.value = verdict
+    ticketResolve.value = resolve
+  })
+}
+
+function answerTicket (decision) {
+  const resolve = ticketResolve.value
+  ticketAlert.value = null
+  ticketResolve.value = null
+  if (resolve) resolve(decision)
+}
+
+/** A suggestion is one of the user's recent tickets, so it is already trusted. */
+function useSuggestion (key) {
+  newTicket.value = key
+  verifiedTicket.value = key.toUpperCase()
+  answerTicket('pick')
+}
+
+async function runTicketCheck (key) {
+  checkingTicket.value = true
+  let verdict
+  try {
+    verdict = await api.timeLoggerVerifyTicket(key)
+  } catch (e) {
+    // A failed check must not block a write the user asked for; Jira still
+    // rejects a bad key on the write itself.
+    notify('Could not check ' + key + ': ' + e.message, { color: 'warning', hint: e.hint })
+    verifiedTicket.value = key
+    return true
+  } finally {
+    checkingTicket.value = false
+  }
+  if (verdict.recent) {
+    verifiedTicket.value = key
+    return true
+  }
+  const decision = await askTicket(verdict)
+  if (decision === 'reject') {
+    focusTicket()
+    return false
+  }
+  if (decision === 'pick') {
+    focusHours()
+    return true
+  }
+  // "Continue anyway" is the user's cue to carry on with hours and comment.
+  focusHours()
+  verifiedTicket.value = key
+  return true
+}
+
+/** Resolves true when the key is safe to write; runs at most once per value. */
+function ensureTicketVerified (key) {
+  const trimmed = key.trim()
+  // A key that is not ticket-shaped is left to the write path, which rejects it
+  // with a useful message rather than a pointless lookup.
+  if (!ticketPattern.test(trimmed)) return Promise.resolve(true)
+  const normalized = trimmed.toUpperCase()
+  if (verifiedTicket.value === normalized) return Promise.resolve(true)
+  if (checkInFlight?.key === normalized) return checkInFlight.promise
+  const promise = runTicketCheck(normalized).finally(() => {
+    if (checkInFlight?.promise === promise) checkInFlight = null
+  })
+  checkInFlight = { key: normalized, promise }
+  return promise
+}
+
+async function onTicketBlur () {
+  const key = newTicket.value.trim()
+  if (!key || !ticketPattern.test(key)) return
+  await ensureTicketVerified(key)
+}
+
 async function onAdd () {
+  const ticket = newTicket.value.trim()
   const hours = num(newHours.value)
-  if (!newTicket.value.trim() || !hours || hours <= 0) return
+  if (!ticket || !hours || hours <= 0) return
+  // Reaching Log without leaving the field still has to clear the guard.
+  if (!(await ensureTicketVerified(ticket))) return
   await run('add', () =>
     props.perform({
       kind: 'insert',
       date: props.day.date,
-      ticket: newTicket.value.trim(),
+      ticket,
       hours,
       comment: newComment.value.trim() || undefined
     })
@@ -211,6 +330,7 @@ async function onAdd () {
   newTicket.value = ''
   newHours.value = null
   newComment.value = ''
+  verifiedTicket.value = ''
 }
 </script>
 
@@ -383,15 +503,20 @@ async function onAdd () {
 
     <v-card-actions class="add-row px-4 py-3">
       <v-text-field
+        ref="ticketField"
         v-model="newTicket"
         label="Add ticket"
         placeholder="PROJ-1234"
         density="compact"
         hide-details
         class="add-ticket"
-        @keyup.enter="onAdd"
+        :loading="checkingTicket"
+        :append-inner-icon="ticketChecked ? 'mdi-check-circle' : undefined"
+        @blur="onTicketBlur"
+        @keydown.enter.prevent="focusHours"
       />
       <v-text-field
+        ref="hoursField"
         v-model="newHours"
         label="Hours"
         type="number"
@@ -431,6 +556,77 @@ async function onAdd () {
         </template>
       </v-tooltip>
     </v-card-actions>
+
+    <!-- The typo guard's reminder: shown when a typed key is not one of the
+         tickets the user logged time to in the lookback window. -->
+    <v-dialog :model-value="Boolean(ticketAlert)" max-width="580" persistent>
+      <v-card v-if="ticketAlert">
+        <v-card-title class="d-flex align-center ga-2 text-title-small">
+          <v-icon
+            :color="ticketAlert.exists ? 'warning' : 'error'"
+            :icon="ticketAlert.exists ? 'mdi-help-circle-outline' : 'mdi-alert-circle-outline'"
+          />
+          {{ ticketAlert.exists ? 'Double-check this ticket' : 'Ticket not found' }}
+        </v-card-title>
+        <v-card-text>
+          <template v-if="ticketAlert.exists">
+            <div class="d-flex align-center flex-wrap ga-2 mb-1">
+              <a
+                :href="ticketAlert.url"
+                target="_blank"
+                rel="noopener"
+                class="text-primary font-weight-medium text-title-medium"
+              >
+                {{ ticketAlert.ticket }}
+              </a>
+              <v-chip v-if="ticketAlert.status" size="x-small" variant="tonal">{{ ticketAlert.status }}</v-chip>
+            </div>
+            <div class="text-body-large mb-4">{{ ticketAlert.summary }}</div>
+            <v-alert type="warning" variant="tonal" density="compact" class="mb-3">
+              <template v-if="ticketAlert.lastLogged">
+                You have not logged time to this ticket in the last {{ ticketAlert.windowDays }} days;
+                the last time was {{ ticketAlert.lastLogged }}.
+              </template>
+              <template v-else>
+                You have never logged time to this ticket.
+              </template>
+              Make sure it is the one you mean before logging.
+            </v-alert>
+          </template>
+          <v-alert v-else type="error" variant="tonal" density="compact" class="mb-3">
+            <strong>{{ ticketAlert.ticket }}</strong> does not exist in Jira. The number is probably mistyped.
+          </v-alert>
+
+          <template v-if="ticketAlert.suggestions && ticketAlert.suggestions.length">
+            <div class="text-body-medium text-medium-emphasis mb-1">
+              Closest tickets you have logged recently — did you mean one of these?
+            </div>
+            <v-list density="compact" class="ticket-suggestions">
+              <v-list-item
+                v-for="s in ticketAlert.suggestions"
+                :key="s.ticket"
+                :title="s.ticket"
+                :subtitle="s.summary"
+                @click="useSuggestion(s.ticket)"
+              >
+                <template #prepend>
+                  <v-icon icon="mdi-history" size="18" />
+                </template>
+              </v-list-item>
+            </v-list>
+          </template>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" prepend-icon="mdi-pencil-outline" @click="answerTicket('reject')">
+            Not the one
+          </v-btn>
+          <v-spacer />
+          <v-btn color="primary" variant="tonal" prepend-icon="mdi-check" @click="answerTicket('continue')">
+            Continue anyway
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-card>
 </template>
 
@@ -536,5 +732,17 @@ async function onAdd () {
 }
 .add-comment {
   flex: 1 1 200px;
+}
+/* Suggested tickets carry whole summaries; let them wrap and clamp rather than
+   stretching the dialog to fit the longest one. */
+.ticket-suggestions {
+  background: transparent;
+}
+.ticket-suggestions :deep(.v-list-item-subtitle) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
 }
 </style>

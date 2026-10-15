@@ -55,7 +55,10 @@ const defaults = {
     timeLoggerSite: '',
     timeLoggerProject: '',
     timeLoggerHoursPerDay: 8,
-    timeLoggerDefaultLogTime: '09:00'
+    timeLoggerDefaultLogTime: '09:00',
+    // How many days back the Time logger looks when warning that a typed ticket
+    // is not one the user has logged time to recently.
+    timeLoggerVerifyWindowDays: 21
   }
 }
 

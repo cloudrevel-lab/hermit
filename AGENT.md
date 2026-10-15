@@ -229,6 +229,7 @@ compare normally. The UI renders those under "Not compared". Preserve this.
 | POST | `/api/jira/issues` | Resolve issue keys found in commit messages |
 | GET | `/api/time-logger/context` | Signed-in user, site, project, hours/day and today |
 | GET | `/api/time-logger/range` | Logged time per day in an inclusive `?from=&to=` range |
+| GET | `/api/time-logger/verify` | Is a typed key among the user's recently logged tickets? Typo guard, read-only |
 | POST | `/api/time-logger/worklog` | Add hours on top of what is logged (insert) |
 | PUT | `/api/time-logger/worklog` | Set a ticket's day total exactly (0 deletes) |
 | PUT | `/api/time-logger/worklog/:id` | Retime one worklog, leaving the day's others alone |
@@ -418,6 +419,7 @@ neither set the page shows a setup prompt instead of querying Jira.
 | `timeLoggerProject` | *(none)* | Project scanned for the logged time; blank uses `jiraProjectKey` |
 | `timeLoggerHoursPerDay` | `8` | Working day for capacity and shortfall; `0` follows Jira |
 | `timeLoggerDefaultLogTime` | `09:00` | `started` time of day for a new worklog |
+| `timeLoggerVerifyWindowDays` | `21` | How far back the new-ticket typo guard looks |
 
 **The writes are scoped, and that is the whole safety story.** `setDayTotal()`
 reads the ticket's worklogs, keeps the caller's own entries for the requested
@@ -434,6 +436,17 @@ requested day, and only then matches the id. An id that is someone else's, on
 another day, or simply stale cannot be reached — it comes back as a 404 telling
 the user to retrieve the range again. This is why the id alone is never trusted
 and the ticket and date always travel with it.
+
+**The typo guard is a read, not a write.** `GET /verify?ticket=` answers whether
+a key is among the caller's own worklog issues in the last
+`timeLoggerVerifyWindowDays` days (default 21). That scan is cached for five
+minutes and `invalidateRecentTickets()` clears it after every write, so a ticket
+the user just logged to is recent on the next check. A key outside the window
+comes back with its Jira summary, status and last-logged date, plus the closest
+recent keys by edit distance, and the page turns that into a confirmation before
+the write. It never blocks a determined user and never writes on its own; a key
+that does not exist at all is reported as `exists: false` rather than an error,
+because that is the loudest typo signal there is.
 
 The context (`/myself` + `/configuration`) costs two Jira calls, so
 `loadSite()` caches it for five minutes; a range is fetched fresh every time

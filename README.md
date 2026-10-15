@@ -412,6 +412,17 @@ Hovering either button spells out what it is about to do — *"Set Wed 05 Aug to
 are hard to confuse. The **Add ticket** row at the foot of each day logs a
 ticket that has no time yet, with an optional comment.
 
+The **Add ticket** box also guards against a mistyped ticket number. When it
+loses focus, the key is checked against the tickets you have already logged time
+to in the last **21 days** (configurable under **Settings → Time logger**). A key
+inside that set is accepted silently; one outside it raises a reminder that names
+the ticket, shows its Jira summary and status, and says when you last logged time
+to it — so a typo like `AIE-4322` for `AIE-4233` is caught before anything is
+written. Any similar keys you have logged recently are offered as *did you mean*
+suggestions. **Not the one** returns the cursor to the ticket box; **Continue
+anyway**, or picking a suggestion, carries on to the hours and comment. A key
+that does not exist at all gets its own "Ticket not found" reminder.
+
 A confirmation dialog appears only when something would be destroyed: setting a
 day to 0, or collapsing a ticket that has several entries that day into one.
 Those rows are marked with an amber *"N entries"* chip. Everything else applies
@@ -448,6 +459,7 @@ settings above. The working day defaults to 8h and new worklogs are stamped at
 | Time logger project key | default project key | Project scanned for your logged time |
 | Time logger hours per day | `8` | Capacity basis; `0` follows Jira's own setting |
 | Time logger worklog time | `09:00` | `started` time of day for a new worklog |
+| Time logger recent-ticket lookback | `21` | Days back the typo guard checks a newly typed key against |
 | Cert for corp network | — | Root CA to trust on a network that inspects HTTPS |
 
 ## Corporate networks

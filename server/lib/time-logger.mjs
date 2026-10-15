@@ -33,7 +33,11 @@ export const DEFAULTS = {
   hoursPerDay: 8,
   defaultLogTime: '09:00',
   maxRangeDays: 92,
-  workers: 10
+  workers: 10,
+  // How far back "recently worked on" reaches when a new ticket key is checked
+  // for typos on the Time logger page. Three weeks covers a fortnight of normal
+  // work plus a week away.
+  verifyWindowDays: 21
 }
 
 // ---------------------------------------------------------------- configuration
@@ -48,6 +52,7 @@ async function config () {
   const rawSite = String(s.timeLoggerSite || s.jiraBaseUrl || '').trim().replace(/\/+$/, '')
   const rawProject = String(s.timeLoggerProject || s.jiraProjectKey || '').trim().toUpperCase()
   const hours = Number(s.timeLoggerHoursPerDay)
+  const verifyDays = Number(s.timeLoggerVerifyWindowDays)
   return {
     site: rawSite ? (/^https?:\/\//.test(rawSite) ? rawSite : `https://${rawSite}`) : null,
     project: rawProject || null,
@@ -55,7 +60,11 @@ async function config () {
     hoursPerDay: Number.isFinite(hours) && hours > 0 ? hours : null,
     defaultLogTime: /^\d{1,2}:\d{2}$/.test(s.timeLoggerDefaultLogTime || '')
       ? s.timeLoggerDefaultLogTime
-      : DEFAULTS.defaultLogTime
+      : DEFAULTS.defaultLogTime,
+    // The typo guard's lookback; junk or out-of-range values fall back to 21 days.
+    verifyWindowDays: Number.isFinite(verifyDays) && verifyDays >= 1 && verifyDays <= DEFAULTS.maxRangeDays
+      ? Math.round(verifyDays)
+      : DEFAULTS.verifyWindowDays
   }
 }
 
@@ -418,6 +427,170 @@ async function totalSpent (ctx, ticket) {
     query: { fields: 'timespent' }
   })
   return (data?.fields?.timespent || 0) / 3600
+}
+
+// ------------------------------------------------------- recent-ticket guard
+
+/**
+ * The caller's own worklog issues over the lookback window, keyed by issue key.
+ *
+ * The Time logger page checks every typed key against this set so that a typo
+ * landing on a ticket the user has never worked on is flagged before the write.
+ * The scan is the expensive part, so it is cached briefly and invalidated by any
+ * write — a ticket the user just logged time to is recent immediately after.
+ */
+let recentCache = null
+
+async function recentLoggedTickets (ctx, windowDays) {
+  const now = Date.now()
+  if (
+    recentCache &&
+    recentCache.site === ctx.site &&
+    recentCache.project === ctx.project &&
+    recentCache.windowDays === windowDays &&
+    now - recentCache.at < 5 * 60 * 1000
+  ) {
+    return recentCache.value
+  }
+
+  const today = parseIsoDay(localDate(new Date().toISOString(), ctx.tz), 'today')
+  const first = addDays(today, -(windowDays - 1))
+  const jql = `project = ${ctx.project} AND worklogAuthor = currentUser() ` +
+    `AND worklogDate >= "${first.iso}" AND worklogDate <= "${today.iso}" ORDER BY key`
+  const issues = {}
+  let token
+  do {
+    const body = { jql, maxResults: 100, fields: ['summary'] }
+    if (token) body.nextPageToken = token
+    const { data } = await jiraRequest(ctx.site, '/search/jql', { method: 'POST', body })
+    for (const issue of data?.issues || []) issues[issue.key] = issue.fields?.summary || ''
+    token = data?.nextPageToken
+    if (!token || data?.isLast) break
+  } while (true)
+
+  recentCache = { site: ctx.site, project: ctx.project, windowDays, at: now, value: issues }
+  return issues
+}
+
+/** Any write can change what counts as recent, so the next check re-reads Jira. */
+export function invalidateRecentTickets () {
+  recentCache = null
+}
+
+/** The last day (local) the caller logged time to a ticket, or null for never. */
+async function lastLoggedDate (ctx, ticket) {
+  try {
+    const items = await fetchWorklogs(ctx, ticket)
+    const days = items
+      .filter(w => w.author?.accountId === ctx.accountId)
+      .map(w => localDate(w.started, ctx.tz))
+      .filter(Boolean)
+      .sort()
+    return days.length ? days[days.length - 1] : null
+  } catch {
+    // The reminder is a courtesy; a failed worklog read must not block it.
+    return null
+  }
+}
+
+/**
+ * Optimal string alignment distance. A plain Levenshtein count treats a swapped
+ * pair as two substitutions, which pushes the most common typo — transposed
+ * digits, `4322` for `4233` — down the suggestion list.
+ */
+function editDistance (a, b) {
+  if (a === b) return 0
+  const d = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = 0; i <= a.length; i++) d[i][0] = i
+  for (let j = 0; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+      }
+    }
+  }
+  return d[a.length][b.length]
+}
+
+/** The numeric half of a key, for tie-breaking suggestions by closeness. */
+function ticketNumber (key) {
+  return Number(key.split('-').pop()) || 0
+}
+
+/**
+ * The recently-logged tickets closest to a mistyped key, so the reminder can
+ * offer "did you mean". Only same-project keys are considered, and anything
+ * more than a few edits away is noise rather than a suggestion.
+ */
+function similarRecent (key, recent, limit = 3) {
+  const project = key.split('-')[0]
+  const base = ticketNumber(key)
+  const gap = other => Math.abs(base - ticketNumber(other))
+  return Object.entries(recent)
+    .filter(([other]) => other.split('-')[0] === project)
+    .map(([other, summary]) => ({ ticket: other, summary, distance: editDistance(key, other) }))
+    .filter(s => s.distance > 0 && s.distance <= 3)
+    // Edit distance first, then the numerically closest key, so a transposed
+    // pair beats an unrelated ticket that happens to be equally far.
+    .sort((a, b) =>
+      a.distance - b.distance ||
+      gap(a.ticket) - gap(b.ticket) ||
+      a.ticket.localeCompare(b.ticket))
+    .slice(0, limit)
+}
+
+/**
+ * Check a ticket key before the user logs time to it.
+ *
+ * `recent` is the whole signal: the key already appears on the caller's own
+ * worklogs within the lookback window, so it is one they are working on. When it
+ * does not, the reply names the ticket and, where possible, points at the
+ * closest recent keys — the typo case this exists for. The caller decides what
+ * to do with it; this read never writes and never blocks a determined user.
+ */
+export async function verifyTicket (ticket) {
+  const cfg = await config()
+  requireConfig(cfg)
+  const ctx = await buildCtx(cfg)
+  const key = cleanTicket(ticket, cfg.project)
+  const recent = await recentLoggedTickets(ctx, cfg.verifyWindowDays)
+  if (recent[key]) {
+    return {
+      ticket: key,
+      project: cfg.project,
+      recent: true,
+      exists: true,
+      summary: recent[key] || '',
+      windowDays: cfg.verifyWindowDays
+    }
+  }
+
+  let issue = null
+  try {
+    const { data } = await jiraRequest(ctx.site, `/issue/${encodeURIComponent(key)}`, {
+      query: { fields: 'summary,status' }
+    })
+    issue = data
+  } catch (err) {
+    // An unknown key is the loudest typo signal there is, not a server error.
+    if (err.status !== 404) throw err
+  }
+
+  return {
+    ticket: key,
+    project: cfg.project,
+    recent: false,
+    exists: Boolean(issue),
+    summary: issue?.fields?.summary || '',
+    status: issue?.fields?.status?.name || null,
+    url: `${ctx.site}/browse/${key}`,
+    lastLogged: issue ? await lastLoggedDate(ctx, key) : null,
+    windowDays: cfg.verifyWindowDays,
+    suggestions: similarRecent(key, recent)
+  }
 }
 
 // ---------------------------------------------------------------------- entry
@@ -812,6 +985,7 @@ export async function insertWorklog ({ ticket, date, hours, comment }) {
   const note = typeof comment === 'string' ? comment.trim() || null : null
   const ctx = await buildCtx(cfg)
   const created = await addWorklog(ctx, key, day, amount, note)
+  invalidateRecentTickets()
   return {
     action: 'insert',
     events: [`HTTP ${created.status} - created worklog ${created.data?.id ?? ''} (${created.data?.timeSpent ?? ''})`],
@@ -829,6 +1003,7 @@ export async function updateWorklog ({ ticket, date, hours, comment }) {
   const note = typeof comment === 'string' ? comment.trim() || null : null
   const ctx = await buildCtx(cfg)
   const { events } = await setDayTotal(ctx, key, day, amount, note)
+  invalidateRecentTickets()
   return {
     action: 'update',
     events: events.length
@@ -878,6 +1053,7 @@ export async function updateWorklogEntry ({ ticket, date, id, hours, comment }) 
   const updated = await jiraRequest(ctx.site,
     `/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(target.id)}`,
     { method: 'PUT', body })
+  invalidateRecentTickets()
 
   return {
     action: 'update-entry',
@@ -898,6 +1074,7 @@ export async function deleteWorklogEntry ({ ticket, date, id }) {
   const { status } = await jiraRequest(ctx.site,
     `/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(target.id)}`,
     { method: 'DELETE' })
+  invalidateRecentTickets()
 
   return {
     action: 'delete-entry',

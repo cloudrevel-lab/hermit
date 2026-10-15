@@ -16,7 +16,8 @@ const settings = ref({
   timeLoggerSite: '',
   timeLoggerProject: '',
   timeLoggerHoursPerDay: 8,
-  timeLoggerDefaultLogTime: '09:00'
+  timeLoggerDefaultLogTime: '09:00',
+  timeLoggerVerifyWindowDays: 21
 })
 
 // 400-odd IANA names; the autocomplete makes them searchable.
@@ -267,6 +268,16 @@ onMounted(load)
           label="Default worklog time"
           placeholder="09:00"
           hint="Time of day stamped on a newly created worklog (24-hour HH:MM)."
+          persistent-hint
+        />
+        <v-text-field
+          v-model.number="settings.timeLoggerVerifyWindowDays"
+          label="Recent-ticket lookback"
+          type="number"
+          min="1"
+          max="92"
+          suffix="days"
+          hint="When you type a ticket to log time to, it is checked against the tickets you have logged time to in this many past days. A key outside that window raises a reminder before anything is written."
           persistent-hint
         />
       </v-card-text>

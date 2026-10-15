@@ -56,6 +56,10 @@ export const api = {
   timeLoggerContext: () => call('/time-logger/context'),
   timeLoggerRange: (from, to) =>
     call(`/time-logger/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  // Is this key among the tickets the user has logged time to in the lookback
+  // window? Read-only; the page uses it to flag a likely typo before writing.
+  timeLoggerVerifyTicket: (ticket) =>
+    call(`/time-logger/verify?ticket=${encodeURIComponent(ticket)}`),
   // Add hours on top of what is already logged.
   timeLoggerInsert: (payload) => call('/time-logger/worklog', { method: 'POST', body: payload }),
   // Make the day's total for the ticket exactly `hours` (0 deletes it).

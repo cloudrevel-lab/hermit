@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import {
-  deleteWorklogEntry, getContext, insertWorklog, rangeReport, updateWorklog, updateWorklogEntry
+  deleteWorklogEntry, getContext, insertWorklog, rangeReport, updateWorklog, updateWorklogEntry,
+  verifyTicket
 } from '../lib/time-logger.mjs'
 
 // Jira worklogs for the Time logger page. Reads are harmless; the POST/PUT
@@ -14,6 +15,12 @@ timeLoggerRouter.get('/context', async (req, res, next) => {
 
 timeLoggerRouter.get('/range', async (req, res, next) => {
   try { res.json(await rangeReport(req.query.from, req.query.to)) } catch (err) { next(err) }
+})
+
+// Is this key one the user has logged time to recently? Read-only typo guard
+// consulted when the ticket field loses focus; it never writes to Jira.
+timeLoggerRouter.get('/verify', async (req, res, next) => {
+  try { res.json(await verifyTicket(req.query.ticket)) } catch (err) { next(err) }
 })
 
 // Insert: add hours on top of what is already logged.
