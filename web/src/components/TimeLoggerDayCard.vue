@@ -28,6 +28,9 @@ const verifiedTicket = ref('')
 const checkingTicket = ref(false)
 const ticketAlert = ref(null)
 const ticketResolve = ref(null)
+// What the last check learned about the verified key, so hovering the box can
+// show the ticket's title rather than only the number.
+const ticketInfo = ref(null)
 let checkInFlight = null
 const ticketField = ref(null)
 const hoursField = ref(null)
@@ -36,6 +39,23 @@ const ticketChecked = computed(() => {
   const key = newTicket.value.trim().toUpperCase()
   return Boolean(key) && verifiedTicket.value === key
 })
+
+/** Null until the box holds a key this component has actually checked. */
+const ticketHover = computed(() => {
+  const key = newTicket.value.trim().toUpperCase()
+  if (!key || verifiedTicket.value !== key) return null
+  const info = ticketInfo.value
+  if (!info || info.ticket !== key) return null
+  return { text: info.summary || 'Ticket verified', status: info.status || null }
+})
+
+function rememberTicket (key, summary, status) {
+  ticketInfo.value = {
+    ticket: key.toUpperCase(),
+    summary: summary || '',
+    status: status || null
+  }
+}
 // Ticket -> whether its row is expanded to show worklog comments.
 const expanded = ref({})
 // Worklog id -> editable hours for that single entry, independent of the
@@ -252,8 +272,10 @@ function answerTicket (decision) {
 
 /** A suggestion is one of the user's recent tickets, so it is already trusted. */
 function useSuggestion (key) {
+  const suggestion = ticketAlert.value?.suggestions?.find(s => s.ticket === key)
   newTicket.value = key
   verifiedTicket.value = key.toUpperCase()
+  rememberTicket(key, suggestion?.summary)
   answerTicket('pick')
 }
 
@@ -273,6 +295,7 @@ async function runTicketCheck (key) {
   }
   if (verdict.recent) {
     verifiedTicket.value = key
+    rememberTicket(key, verdict.summary, verdict.status)
     return true
   }
   const decision = await askTicket(verdict)
@@ -287,6 +310,7 @@ async function runTicketCheck (key) {
   // "Continue anyway" is the user's cue to carry on with hours and comment.
   focusHours()
   verifiedTicket.value = key
+  rememberTicket(key, verdict.summary, verdict.status)
   return true
 }
 
@@ -331,6 +355,7 @@ async function onAdd () {
   newHours.value = null
   newComment.value = ''
   verifiedTicket.value = ''
+  ticketInfo.value = null
 }
 </script>
 
@@ -502,19 +527,28 @@ async function onAdd () {
     <v-divider />
 
     <v-card-actions class="add-row px-4 py-3">
-      <v-text-field
-        ref="ticketField"
-        v-model="newTicket"
-        label="Add ticket"
-        placeholder="PROJ-1234"
-        density="compact"
-        hide-details
-        class="add-ticket"
-        :loading="checkingTicket"
-        :append-inner-icon="ticketChecked ? 'mdi-check-circle' : undefined"
-        @blur="onTicketBlur"
-        @keydown.enter.prevent="focusHours"
-      />
+      <v-tooltip :disabled="!ticketHover" location="top" max-width="380">
+        <template #activator="{ props: tip }">
+          <div v-bind="tip" class="add-ticket">
+            <v-text-field
+              ref="ticketField"
+              v-model="newTicket"
+              label="Add ticket"
+              placeholder="PROJ-1234"
+              density="compact"
+              hide-details
+              :loading="checkingTicket"
+              :append-inner-icon="ticketChecked ? 'mdi-check-circle' : undefined"
+              @blur="onTicketBlur"
+              @keydown.enter.prevent="focusHours"
+            />
+          </div>
+        </template>
+        <div class="text-body-medium">{{ ticketHover?.text }}</div>
+        <div v-if="ticketHover?.status" class="text-body-small text-medium-emphasis mt-1">
+          {{ ticketHover.status }}
+        </div>
+      </v-tooltip>
       <v-text-field
         ref="hoursField"
         v-model="newHours"
@@ -726,6 +760,7 @@ async function onAdd () {
 }
 .add-ticket {
   flex: 0 1 170px;
+  min-width: 0;
 }
 .add-hours {
   flex: 0 1 120px;

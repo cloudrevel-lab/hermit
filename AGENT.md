@@ -446,7 +446,9 @@ comes back with its Jira summary, status and last-logged date, plus the closest
 recent keys by edit distance, and the page turns that into a confirmation before
 the write. It never blocks a determined user and never writes on its own; a key
 that does not exist at all is reported as `exists: false` rather than an error,
-because that is the loudest typo signal there is.
+because that is the loudest typo signal there is. The verdict's summary and
+status are kept on the card after acceptance, so hovering the Add ticket box can
+show the title without another Jira call; editing the key drops it.
 
 The context (`/myself` + `/configuration`) costs two Jira calls, so
 `loadSite()` caches it for five minutes; a range is fetched fresh every time

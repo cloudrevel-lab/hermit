@@ -421,7 +421,10 @@ to it — so a typo like `AIE-4322` for `AIE-4233` is caught before anything is
 written. Any similar keys you have logged recently are offered as *did you mean*
 suggestions. **Not the one** returns the cursor to the ticket box; **Continue
 anyway**, or picking a suggestion, carries on to the hours and comment. A key
-that does not exist at all gets its own "Ticket not found" reminder.
+that does not exist at all gets its own "Ticket not found" reminder. Once a key
+is verified, hovering the **Add ticket** box shows that ticket's title — and its
+status when the check fetched one — so you can confirm it is the work you meant
+before logging.
 
 A confirmation dialog appears only when something would be destroyed: setting a
 day to 0, or collapsing a ticket that has several entries that day into one.
