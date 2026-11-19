@@ -1,8 +1,18 @@
 import { Router } from 'express'
-import { branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, mergeSourceBranch, releaseOverview } from '../lib/git-service.mjs'
+import { activePullRequests, branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, mergeSourceBranch, releaseOverview } from '../lib/git-service.mjs'
 import { getDb } from '../lib/db.mjs'
 
 export const gitRouter = Router()
+
+/**
+ * Open pull requests across every registered repo. The page groups them by
+ * repository, so a repo that failed to load still occupies its own slot.
+ */
+gitRouter.get('/pull-requests', async (req, res, next) => {
+  try {
+    res.json(await activePullRequests({ refresh: req.query.refresh === '1' }))
+  } catch (err) { next(err) }
+})
 
 gitRouter.get('/releases', async (req, res, next) => {
   try {

@@ -59,6 +59,7 @@ export async function cacheStats () {
 
 export const TTL = {
   refs: 2 * 60 * 1000,          // branch tips move often
+  pullRequests: 2 * 60 * 1000,  // open PRs move even more often than refs
   range: 30 * 24 * 60 * 60 * 1000, // SHA-keyed, effectively immutable
   jira: 10 * 60 * 1000
 }

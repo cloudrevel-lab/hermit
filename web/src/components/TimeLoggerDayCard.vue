@@ -10,7 +10,10 @@ const props = defineProps({
   day: { type: Object, required: true },
   hoursPerDay: { type: Number, default: 8 },
   perform: { type: Function, required: true },
-  changed: { type: String, default: '' }
+  changed: { type: String, default: '' },
+  // The active search text, when the page is filtering the range. Rows open by
+  // default then, so the comment that matched is visible without a second click.
+  search: { type: String, default: '' }
 })
 
 // One editable value per ticket, seeded from what Jira currently holds.
@@ -61,15 +64,25 @@ const expanded = ref({})
 // Worklog id -> editable hours for that single entry, independent of the
 // ticket-level box above it.
 const logDraft = ref({})
+// Comment editing is one entry at a time, so a single draft is enough:
+// - worklog id being edited, or null
+// - the text being typed, seeded from the comment Jira currently holds
+const commentEditId = ref(null)
+const commentDraft = ref('')
 
-/** A row opens when it has a comment to read, or more than one entry to break down. */
-function hasDetail (entry) {
-  return entry.worklogs.length > 1 || entry.worklogs.some((w) => w.comment)
+/**
+ * Every row opens, even a single entry without a comment: the panel is where an
+ * entry's start time and comment are shown, and where a comment is added or
+ * edited after the worklog was logged. While a search is active a row starts
+ * open, because the matched comment is usually inside it; an explicit toggle
+ * still wins.
+ */
+function toggle (entry) {
+  expanded.value = { ...expanded.value, [entry.ticket]: !isOpen(entry) }
 }
 
-function toggle (entry) {
-  if (!hasDetail(entry)) return
-  expanded.value = { ...expanded.value, [entry.ticket]: !expanded.value[entry.ticket] }
+function isOpen (entry) {
+  return expanded.value[entry.ticket] ?? Boolean(props.search)
 }
 
 watch(
@@ -100,6 +113,17 @@ const totalHint = computed(() => {
   if (props.day.weekend && props.day.total === 0) return 'weekend'
   if (Math.abs(delta) < 0.05) return 'full day'
   return delta > 0 ? `${delta}h over` : `${Math.abs(delta)}h short`
+})
+
+/**
+ * "2 tickets · 3h short", or "2 matching tickets" while the range is filtered.
+ * The day's total stays the real one — filtering narrows which rows are shown,
+ * it does not pretend the rest of the day's time is gone.
+ */
+const subtitle = computed(() => {
+  const n = props.day.entries.length
+  const tickets = `${n}${props.search ? ' matching' : ''} ticket${n === 1 ? '' : 's'}`
+  return `${tickets} · ${totalHint.value}`
 })
 
 function num (value) {
@@ -216,6 +240,48 @@ function logUpdateTip (log) {
   const next = num(logDraft.value[log.id])
   if (!next || next <= 0) return 'Enter hours greater than 0'
   return `Set this entry to ${next}h (currently ${log.hours}h); the day's other entries are untouched`
+}
+
+function startCommentEdit (log) {
+  commentEditId.value = log.id
+  commentDraft.value = log.comment || ''
+}
+
+function cancelCommentEdit () {
+  commentEditId.value = null
+  commentDraft.value = ''
+}
+
+/**
+ * Save an edited comment without touching the entry's hours.
+ *
+ * Jira's own comment text is plain, and the read path escapes anything that
+ * would otherwise look like Markdown, so an ordinary comment survives this round
+ * trip unchanged. A comment that was *formatted* in Jira comes back as Markdown
+ * and is re-saved as those literal characters — the edit box is plain text, like
+ * the one that created it. An empty box clears the comment.
+ */
+async function onCommentSave (entry, log) {
+  const text = commentDraft.value.trim()
+  if (text === (log.comment || '').trim()) {
+    cancelCommentEdit()
+    return
+  }
+  let saved = false
+  await run(`lc:${log.id}`, async () => {
+    saved = await props.perform({
+      kind: 'entryUpdate',
+      date: props.day.date,
+      ticket: entry.ticket,
+      id: log.id,
+      hours: log.hours,
+      comment: text,
+      what: 'comment'
+    })
+  })
+  // Leave the box open with the typed text when the write failed, so nothing is
+  // lost and the user can retry or copy it.
+  if (saved) cancelCommentEdit()
 }
 
 // Shown in the Log button's tooltip so the shortcut is discoverable; the
@@ -371,9 +437,7 @@ async function onAdd () {
         {{ day.label }}
         <v-chip v-if="day.weekend" size="x-small" class="ml-2" variant="tonal">weekend</v-chip>
       </v-card-title>
-      <v-card-subtitle>
-        {{ day.entries.length }} ticket{{ day.entries.length === 1 ? '' : 's' }} · {{ totalHint }}
-      </v-card-subtitle>
+      <v-card-subtitle>{{ subtitle }}</v-card-subtitle>
     </v-card-item>
 
     <v-divider v-if="day.entries.length" />
@@ -381,11 +445,8 @@ async function onAdd () {
     <v-card-text v-if="day.entries.length" class="py-2">
       <template v-for="entry in day.entries" :key="entry.ticket">
       <div
-        class="entry-row py-2"
-        :class="{
-          'entry-changed': changed === `${day.date}:${entry.ticket}`,
-          'entry-clickable': hasDetail(entry)
-        }"
+        class="entry-row py-2 entry-clickable"
+        :class="{ 'entry-changed': changed === `${day.date}:${entry.ticket}` }"
         @click="toggle(entry)"
       >
         <div class="entry-ident">
@@ -407,8 +468,8 @@ async function onAdd () {
           >
             {{ entry.worklogs.length }} entries
           </v-chip>
-          <v-icon v-if="hasDetail(entry)" size="small" class="ml-1 entry-toggle">
-            {{ expanded[entry.ticket] ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+          <v-icon size="small" class="ml-1 entry-toggle">
+            {{ isOpen(entry) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
           </v-icon>
           <div class="text-body-small text-medium-emphasis entry-summary">{{ entry.summary }}</div>
         </div>
@@ -471,7 +532,7 @@ async function onAdd () {
         </div>
       </div>
 
-      <div v-if="expanded[entry.ticket]" class="entry-detail px-4 pb-3">
+      <div v-if="isOpen(entry)" class="entry-detail px-4 pb-3">
         <div v-for="w in entry.worklogs" :key="w.id" class="detail-row">
           <div class="detail-head">
             <div class="detail-meta text-body-small text-medium-emphasis">
@@ -503,6 +564,18 @@ async function onAdd () {
                   </v-btn>
                 </template>
               </v-tooltip>
+              <v-tooltip :text="w.comment ? 'Edit this comment' : 'Add a comment'" location="top">
+                <template #activator="{ props: tip }">
+                  <v-btn
+                    v-bind="tip"
+                    size="x-small"
+                    variant="text"
+                    icon="mdi-comment-edit-outline"
+                    :disabled="commentEditId === w.id"
+                    @click="startCommentEdit(w)"
+                  />
+                </template>
+              </v-tooltip>
               <v-tooltip text="Delete just this entry" location="top">
                 <template #activator="{ props: tip }">
                   <v-btn
@@ -517,8 +590,41 @@ async function onAdd () {
               </v-tooltip>
             </div>
           </div>
-          <MarkdownText v-if="w.comment" :text="w.comment" class="detail-comment" />
-          <div v-else class="detail-comment text-medium-emphasis font-italic">No comment</div>
+          <div v-if="commentEditId === w.id" class="detail-comment-edit">
+            <v-textarea
+              v-model="commentDraft"
+              label="Comment"
+              placeholder="Leave blank to remove the comment"
+              density="compact"
+              hide-details
+              rows="1"
+              max-rows="8"
+              auto-grow
+              autofocus
+              @keydown.enter.meta.prevent="onCommentSave(entry, w)"
+              @keydown.enter.ctrl.prevent="onCommentSave(entry, w)"
+              @keydown.esc="cancelCommentEdit"
+            />
+            <div class="d-flex align-center ga-2 mt-2">
+              <v-btn
+                size="x-small"
+                color="primary"
+                variant="tonal"
+                :loading="busyKey === `lc:${w.id}`"
+                @click="onCommentSave(entry, w)"
+              >
+                Save
+              </v-btn>
+              <v-btn size="x-small" variant="text" @click="cancelCommentEdit">Cancel</v-btn>
+              <span class="text-body-small text-medium-emphasis">
+                Blank removes it · {{ submitHint }} saves
+              </span>
+            </div>
+          </div>
+          <template v-else>
+            <MarkdownText v-if="w.comment" :text="w.comment" class="detail-comment" />
+            <div v-else class="detail-comment text-medium-emphasis font-italic">No comment</div>
+          </template>
         </div>
       </div>
       </template>
@@ -728,6 +834,9 @@ async function onAdd () {
 }
 .detail-comment {
   word-break: break-word;
+}
+.detail-comment-edit {
+  margin-top: 10px;
 }
 .entry-ident {
   flex: 1 1 260px;

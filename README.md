@@ -2,7 +2,9 @@
 
 A local web app for working out what actually changed between two releases,
 across all the repositories that make one up. It also includes a **Time logger**
-for reconciling your Jira worklogs against a date range and fixing them.
+for reconciling your Jira worklogs against a date range and fixing them, and a
+**Pull requests** page that collects the open PRs from every configured
+repository.
 
 Pick a base and a target release — say 1.2.2 and 1.2.3 — and Hermit finds
 `release/1.2.2` and `release/1.2.3` in every configured repo and lists the
@@ -266,7 +268,8 @@ The cherry-pick page remembers its repository and both refs the same way.
 
 Before you compare, the page shows a **coverage grid**: which repos have a
 branch for each release. After you compare, you get per-repo commit lists with
-SHAs linking back to Azure DevOps and file change counts.
+SHAs linking back to Azure DevOps and file change counts. **Back to coverage**
+returns to that grid without losing the selected pair.
 
 Each commit also shows **the branch it was merged from**:
 
@@ -299,7 +302,46 @@ reason, rather than being silently dropped.
 **Copy notes** puts the whole comparison on the clipboard as Markdown, grouped
 by repo — usable as a release-notes starting point.
 
-### 3. Cross-check against Jira
+### 3. See which repositories carry a release
+
+**Release repositories** answers the other half of the question before a
+release: which repositories have a branch for the version you are cutting, and
+are therefore the ones to release? Pick a version and the page lists every
+enabled repository whose branch list contains `release/<version>`, with the
+branch tip and a link straight to the branch. **Copy repository names** puts
+that list on the clipboard for a release checklist.
+
+The **Repositories** picker narrows the list to a subset. Repositories that do
+not have the branch are listed separately, under **Without
+release/<version>**, so it is clear they are not part of this release. The
+version and repository filter are remembered per browser, like the compare
+page's pair.
+
+### 4. Review active pull requests
+
+**Pull requests** collects the open pull requests from every registered
+repository — Azure DevOps and GitHub together — without opening each repo in its
+own web UI. Each repository gets a card listing its open PRs: the number and
+title link to the provider, and each row shows the reviewers and their vote, the
+source and target branch, the author and how long it has been open. Drafts are
+marked, and the summary at the top counts open pull requests, drafts and the
+repositories that have any.
+
+Your own reviewer entries are highlighted as **You** with the state of your
+vote, and a banner at the top counts the PRs still awaiting your review. That is
+the quickest way to see whether anything needs your attention before you dig
+into a repository. Click the banner to filter the page down to just those PRs;
+clear the **Awaiting my review** chip beside the filter to show everything again.
+
+Type in the filter box to narrow by title, PR number, reviewer, author, branch
+or repository. **Refresh** bypasses the two-minute cache. Repositories with
+nothing open are listed at the bottom, and a repo that could not be read — a bad
+token, a rate limit — gets its own error card instead of hiding the rest.
+
+Disabled repositories are included here: the switch under **Repositories** only
+scopes release comparisons.
+
+### 5. Cross-check against Jira
 
 Paste the Jira release URL into the cross-check panel, for example:
 
@@ -323,7 +365,7 @@ does not.
 The pattern is a regex you can change in Settings. The default,
 `[A-Z][A-Z0-9]+-\d+`, matches `PROJ-482` but not `PROJ 482` with a space.
 
-### 4. Pin a Jira release
+### 6. Pin a Jira release
 
 **Jira releases** lists every ticket carrying a given Fix Version, for example
 `My Project 1.2.3 (Next Release)`. Pin one by picking it from the project's own
@@ -339,7 +381,7 @@ of the cache.
 The name is matched literally, exactly as Jira has it, so a typo simply returns
 no tickets — the page says so rather than showing an empty table.
 
-### 5. Cherry-pick between branches
+### 7. Cherry-pick between branches
 
 **Cherry-pick** compares any two refs in a single repo side by side. Each pane
 lists the commits that side has and the other does not. Tick the ones you want
@@ -385,13 +427,21 @@ brief naming the repository, the source and target branches and the exact
 commits, for when you would rather have an AI agent (or yourself) run the merge
 locally.
 
-### 6. Log your time
+### 8. Log your time
 
 **Time logger** reconciles your Jira worklogs against a date range and lets you
-correct them in place. Pick a range — or a quick preset, **Today**, **This
-week**, **Last week**, **This month**, **Last month** — and press **Retrieve**.
+correct them in place. It opens on the **last 2 months** — broad enough that a
+search covers recent history, small enough to load in about a second. Pick
+another range — or a quick preset, **Today**, **This week**, **Last week**,
+**This month**, **Last month**, **Last 2 months** — and press **Retrieve**.
 Every day comes back with the tickets you logged time on and an editable hours
 box.
+
+Days are listed **latest first**; the button beside **Retrieve** reverses that
+to earliest first, and the choice is remembered across visits. Leave the page
+open and it keeps itself current: it re-checks the date every ten minutes, and
+whenever the tab regains focus, so a new day grows the range and appears as its
+own card without a refresh. A range pointed at the past stays where it is.
 
 > This is the one page that **writes** to Jira. It only ever changes the
 > signed-in user's own worklogs, for the ticket and day you choose, but the
@@ -411,6 +461,19 @@ Hovering either button spells out what it is about to do — *"Set Wed 05 Aug to
 2h (currently 14h)"* versus *"Add 2h on top - 14h becomes 16h"* — so the two
 are hard to confuse. The **Add ticket** row at the foot of each day logs a
 ticket that has no time yet, with an optional comment.
+
+Click a ticket row to expand it: each worklog shows its start time and comment,
+with its own hours box and delete button. The comment button beside an entry
+edits that entry's comment without touching its hours — blank removes the
+comment — and a worklog logged without one can be given a comment the same way.
+
+**Search** sits above the date range. Typing filters the days already on screen —
+ticket key, ticket title and comment text, all words required — so it is instant
+and costs nothing. **Search 12 months** goes further: Jira cannot search worklog
+text, so the server reads the worklogs of every ticket you logged time to over
+the last year (a second or two, then cached), groups the hits by day, and loads
+that day into the editor when you click a result. Searching for just a ticket key
+is a single lookup rather than a scan.
 
 The **Add ticket** box also guards against a mistyped ticket number. When it
 loses focus, the key is checked against the tickets you have already logged time
@@ -558,13 +621,15 @@ instant and does not re-hit Azure DevOps.
 
 Commit ranges are keyed by the two branch **tip SHAs**, which means a cached
 range can never be stale: if someone pushes to a branch, the tip changes and so
-does the key. Branch listings expire after two minutes. Jira lookups after ten.
+does the key. Branch listings expire after two minutes, and so does each
+repository's open-PR list. Jira lookups after ten.
 
 The **Time logger** range is fetched fresh on every *Retrieve*, because writing
 time changes what it would return.
 
-To force fresh data, use **Refresh branches** on the compare page, the refresh
-button next to *Copy notes*, or clear the whole cache from **Settings → Cache**.
+To force fresh data, use **Refresh branches** on the compare page, **Refresh**
+on the pull-requests page, the refresh button next to *Copy notes*, or clear the
+whole cache from **Settings → Cache**.
 
 ## Where things are stored
 
@@ -574,7 +639,7 @@ per-user directory described in [Install](#install).
 | Path | Contents | In git? |
 | --- | --- | --- |
 | `data/db.json` | Your repo list, pinned Jira releases and settings | No |
-| `data/cache.json` | Cached branch and commit data | No |
+| `data/cache.json` | Cached branch, commit and pull-request data | No |
 | `data/last-port` | The port the app last bound to, so the URL stays put | No |
 | `data/*.pre-restore-*` | Previous data kept when a restore overwrites it | No |
 | `backups/*.tar.gz` | `make backup` output | No |

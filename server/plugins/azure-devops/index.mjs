@@ -60,13 +60,40 @@ function describePullRequest (coords, pr) {
   }
 }
 
+/**
+ * Azure votes are numbers: 10 approved, 5 approved with suggestions, 0 no
+ * vote, -5 waiting for the author, -10 rejected. Normalise them so the browser
+ * does not have to know the provider's scale.
+ */
+function reviewerState (vote) {
+  const value = Number(vote)
+  if (!Number.isFinite(value)) return 'awaiting'
+  if (value >= 10) return 'approved'
+  if (value > 0) return 'approved-suggestions'
+  if (value === 0) return 'awaiting'
+  if (value > -10) return 'waiting-author'
+  return 'rejected'
+}
+
+function normaliseReviewers (pr, viewerId) {
+  return (pr.reviewers || [])
+    // Azure keeps removed reviewers on the record with active: false.
+    .filter(reviewer => reviewer.active !== false)
+    .map(reviewer => ({
+      id: reviewer.id || reviewer.uniqueName || reviewer.displayName,
+      name: reviewer.displayName || reviewer.uniqueName || 'Unknown',
+      state: reviewerState(reviewer.vote),
+      isCurrentUser: Boolean(viewerId && reviewer.id === viewerId)
+    }))
+}
+
 const plugin = {
   id: 'azure-devops',
   name: 'Azure DevOps',
   icon: 'mdi-microsoft-azure-devops',
   color: '#0078D4',
   urlExample: 'https://dev.azure.com/{org}/{project}/_git/{repo}',
-  capabilities: { pullRequests: true, diffCounts: true, cherryPick: true, pullRequestWrites: true, mergeRefs: true },
+  capabilities: { pullRequests: true, pullRequestList: true, diffCounts: true, cherryPick: true, pullRequestWrites: true, mergeRefs: true },
 
   /** Any dev.azure.com or *.visualstudio.com URL that names a repo. */
   matchesUrl (url) {
@@ -198,6 +225,50 @@ const plugin = {
       baseCommit: payload.baseCommit || null,
       targetCommit: payload.targetCommit || null
     }
+  },
+
+  /**
+   * Active pull requests, paged with the same continuation-token header as the
+   * ref listing. Drafts are active too, so they come back with `draft` set.
+   * Reviewers carry the token owner's vote, which is what makes "waiting on
+   * me" visible without opening every PR.
+   */
+  async listPullRequests (coords) {
+    const raw = []
+    let continuationToken
+    do {
+      const { payload, headers } = await call(coords, '/pullrequests', {
+        'searchCriteria.status': 'active',
+        $top: 100,
+        continuationToken
+      })
+      raw.push(...(payload.value || []))
+      continuationToken = headers.get('x-ms-continuationtoken') || undefined
+    } while (continuationToken)
+
+    if (!raw.length) return []
+
+    // The identity call is cached by host, and costs nothing after the first
+    // repo. If it fails, reviewers are still listed, just not marked as you.
+    let viewerId = null
+    try {
+      viewerId = await plugin.currentUserId(coords)
+    } catch {
+      // A token that can read PRs may still be refused connectionData.
+    }
+
+    return raw.map(pr => ({
+      pullRequestId: pr.pullRequestId,
+      title: pr.title || '',
+      status: 'active',
+      draft: Boolean(pr.isDraft),
+      sourceBranch: (pr.sourceRefName || '').replace('refs/heads/', '') || null,
+      targetBranch: (pr.targetRefName || '').replace('refs/heads/', ''),
+      createdBy: pr.createdBy?.displayName || pr.createdBy?.uniqueName || null,
+      createdAt: pr.creationDate || null,
+      reviewers: normaliseReviewers(pr, viewerId),
+      url: plugin.pullRequestWebUrl(coords, pr.pullRequestId)
+    }))
   },
 
   /**

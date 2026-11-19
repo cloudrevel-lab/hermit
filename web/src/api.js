@@ -38,6 +38,7 @@ export const api = {
   updateRepo: (id, repo) => call(`/repos/${id}`, { method: 'PUT', body: repo }),
   deleteRepo: (id) => call(`/repos/${id}`, { method: 'DELETE' }),
   branches: (id, refresh) => call(`/git/repos/${id}/branches${refresh ? '?refresh=1' : ''}`),
+  pullRequests: (refresh) => call(`/git/pull-requests${refresh ? '?refresh=1' : ''}`),
 
   releases: (refresh) => call(`/git/releases${refresh ? '?refresh=1' : ''}`),
   compare: (payload) => call('/git/compare', { method: 'POST', body: payload }),
@@ -60,6 +61,12 @@ export const api = {
   // window? Read-only; the page uses it to flag a likely typo before writing.
   timeLoggerVerifyTicket: (ticket) =>
     call(`/time-logger/verify?ticket=${encodeURIComponent(ticket)}`),
+  // Free-text search over the caller's worklogs. Jira cannot search worklog
+  // text, so the server scans each ticket's worklogs; keep it for "all history"
+  // and filter the already-loaded range in the page instead.
+  timeLoggerSearch: (q, months) =>
+    call(`/time-logger/search?q=${encodeURIComponent(q)}` +
+      (months ? `&months=${encodeURIComponent(months)}` : '')),
   // Add hours on top of what is already logged.
   timeLoggerInsert: (payload) => call('/time-logger/worklog', { method: 'POST', body: payload }),
   // Make the day's total for the ticket exactly `hours` (0 deletes it).

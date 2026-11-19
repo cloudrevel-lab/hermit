@@ -118,6 +118,8 @@ web/
       TimeLoggerDayCard.vue  One day of the time-logger report, with edit rows
     pages/
       ReleasesPage.vue     Cross-repo release comparison + Jira cross-check
+      ReleaseRepositoriesPage.vue  Which repos carry a given release branch
+      PullRequestsPage.vue Open pull requests across every registered repo
       CherryPickPage.vue   Two-ref comparison with commit staging
       TimeLoggerPage.vue   Date range of logged worklogs, editable in place
       RepositoriesPage.vue Repo CRUD
@@ -201,6 +203,20 @@ and `git-service.mjs` never names a provider.
 credential returns `{status: 'error', message, hint}` in its slot while the rest
 compare normally. The UI renders those under "Not compared". Preserve this.
 
+The **Release repositories** page reuses `/api/git/releases` rather than adding
+a second fan-out. `collateReleases()` already reports, per version, which repos
+carry the branch (`repos`) and where each branch points (`tips`, `urls`), so the
+page only filters that payload by the selected version and repository subset.
+`allBranches()` adds the branch URL after reading the cache, which keeps a
+provider URL change from requiring the cached branch list to be cleared.
+
+The **Pull requests** page is a flatter version of the same fan-out:
+`activePullRequests()` lists every registered repo — including disabled ones,
+because the enable switch only scopes release comparisons — calls
+`plugin.listPullRequests()` for each, caches the per-repo result, and returns an
+error slot for any repo that fails. It needs no branch data, so a slow provider
+cannot delay the others.
+
 ## API surface
 
 | Method | Path | Purpose |
@@ -215,7 +231,8 @@ compare normally. The UI renders those under "Not compared". Preserve this.
 | POST | `/api/repos` | Add |
 | PUT | `/api/repos/:id` | Update |
 | DELETE | `/api/repos/:id` | Remove |
-| GET | `/api/git/releases` | Branch coverage across all repos, collated by version |
+| GET | `/api/git/releases` | Branch coverage across all repos, collated by version, with per-repo tips and branch URLs |
+| GET | `/api/git/pull-requests` | Active pull requests across every registered repo, grouped per repo |
 | POST | `/api/git/compare` | Cross-repo comparison of two release branches |
 | POST | `/api/git/compare-refs` | Two arbitrary refs in one repo, both directions |
 | GET | `/api/git/repos/:id/branches` | Branch list for one repo |
@@ -230,9 +247,10 @@ compare normally. The UI renders those under "Not compared". Preserve this.
 | GET | `/api/time-logger/context` | Signed-in user, site, project, hours/day and today |
 | GET | `/api/time-logger/range` | Logged time per day in an inclusive `?from=&to=` range |
 | GET | `/api/time-logger/verify` | Is a typed key among the user's recently logged tickets? Typo guard, read-only |
+| GET | `/api/time-logger/search` | Free-text search over the user's worklogs in a rolling window (`?q=&months=`) |
 | POST | `/api/time-logger/worklog` | Add hours on top of what is logged (insert) |
 | PUT | `/api/time-logger/worklog` | Set a ticket's day total exactly (0 deletes) |
-| PUT | `/api/time-logger/worklog/:id` | Retime one worklog, leaving the day's others alone |
+| PUT | `/api/time-logger/worklog/:id` | Retime or re-comment one worklog, leaving the day's others alone |
 | DELETE | `/api/time-logger/worklog/:id` | Delete one worklog (`?ticket=&date=`) |
 
 Errors are `{ error, hint }` with a meaningful status. `hint` is a longer,
@@ -376,6 +394,7 @@ Do not assume `x.y.z` when touching that file.
 | Key shape | TTL | Why |
 | --- | --- | --- |
 | `refs:<repoId>` | 2 min | Branch tips move |
+| `pulls:v2:<repoId>` | 2 min | PRs open, merge and close without a ref changing |
 | `range:v3:<repoId>:<baseSha>..<targetSha>` | 30 days | Keyed by content, cannot go stale |
 | `pair:v3:<repoId>:<base>..<target>` | 2 min | Keyed by branch name, so it can |
 | `jira:version:<host>:<id>` | 10 min | Issue status changes during a release |
@@ -456,11 +475,47 @@ because a write can change it.
 
 Each worklog in a range report carries its comment, converted from Jira v3's
 ADF to **Markdown** by `commentText()` (the raw ADF is still what an update
-re-sends, so nothing in the read path changes what gets written back). A row
-with a comment — or more than one worklog — expands in place to show each
-entry's time and comment, with its own hours box, Update and delete button, so
-a single entry can be retimed or removed without collapsing the rest of the
-day's entries for that ticket into one.
+re-sends, so nothing in the read path changes what gets written back). Every row
+expands in place to show each entry's start time and comment, with its own hours
+box, Update, comment-edit and delete button, so a single entry can be retimed,
+re-commented or removed without collapsing the rest of the day's entries for
+that ticket into one, and a comment can be added to a worklog that was logged
+without one.
+
+The comment editor edits the one worklog it was opened on: Jira's own comment is
+plain text, and the read path escapes anything that would otherwise look like
+Markdown, so an ordinary comment survives the round trip unchanged; one that was
+*formatted* in Jira comes back as Markdown and is re-saved as those literal
+characters. An empty box clears the comment rather than leaving it: the update
+sends a single empty paragraph, because ADF has no null comment.
+
+**Search has two scopes, and only one of them is cheap.** The page filters the
+rows it already holds as you type: every term has to appear in the ticket key,
+the summary or a comment, and non-matching tickets (and days) drop out. That
+costs nothing and runs on every keystroke. Everything outside the loaded range
+is a different matter — Jira cannot search worklog text. There is no JQL field
+for a worklog comment, and `text ~` does not index worklogs (JRACLOUD-7553), so
+`searchWorklogs()` lists the caller's worklog issues over a rolling 12 months and
+reads each issue's worklogs: one request per ticket. It caps the scan
+(`searchMaxIssues`), caches the flattened result for 15 minutes, and
+`invalidateRecentTickets()` drops that cache after any write. A query that is
+just a ticket key skips the scan and reads that one issue. Results are grouped by
+day and one click loads that day back into the editable range view, because
+finding a log is usually a prelude to fixing it.
+
+**The page is meant to be left open.** It opens on a rolling **last two
+months** — the window the in-range search covers, and about a second to fetch —
+where the older default of "this week" left recent worklogs unsearchable. Days
+are sorted latest-first by default (remembered in `localStorage` as
+`hermit:timeLoggerSort`), so today's card is at the top. The page also re-checks
+the local date every ten minutes and whenever the tab regains focus; when the
+date has moved and the displayed range ended on the old "today", the default
+window rolls forward — both ends shift, so it cannot creep into the server's
+92-day range limit — anything else gains the new day at the end, and the range
+is re-fetched, so the morning shows the new day's card without a refresh. A
+range pointed at the past gains nothing from a new day and is left alone. Keep
+the check cheap: it compares local date strings and only calls Jira when the day
+has actually changed.
 
 Comments render as formatted text, not a flat blob: emphasis, lists, links,
 code and tables survive the trip out of Jira. Two rules keep that safe, and
@@ -567,7 +622,9 @@ work they have already done:
 Nothing is re-run on its own: Recompute (or the cache-bypass icon) re-runs a
 comparison, Refresh branches re-reads the release overview, Reload re-reads a
 pinned Jira release past the server cache, and Cross-check re-runs the Jira
-lookup.
+lookup. **Back to coverage** drops the comparison, the Jira card and the
+snapshot for that exact pair, so the page stays on the coverage grid across a
+reload; the remembered base/target pair and pinned Jira choice remain.
 
 This uses `sessionStorage` rather than `useStored`'s `localStorage` on
 purpose: a comparison can be large, and `localStorage` is the small store the
@@ -612,7 +669,7 @@ export default {
   icon: 'mdi-bitbucket',        // any mdi name
   color: '#2684FF',
   urlExample: 'https://bitbucket.org/{workspace}/{repo}',
-  capabilities: { pullRequests: true, diffCounts: true, cherryPick: false, mergeRefs: false },
+  capabilities: { pullRequests: true, pullRequestList: true, diffCounts: true, cherryPick: false, mergeRefs: false },
 
   matchesUrl (url),             // URL object -> boolean. Cheap host test
   parseUrl (url),               // -> coords, an opaque provider-specific object
@@ -629,6 +686,7 @@ export default {
   async listCommitsBetween (coords, { base, target, top }),
   async diffCounts (coords, { base, target }),         // if capabilities.diffCounts
   async pullRequestsForCommits (coords, ids, { commits }),  // if capabilities.pullRequests
+  async listPullRequests (coords),                     // if capabilities.pullRequestList
   async createCherryPick (coords, { commitIds, ontoRef, topicBranch }),  // if capabilities.cherryPick
   async getBranchTip (coords, branch),                 // if capabilities.mergeRefs
   async mergeSourceInto (coords, { sourceRef, targetRef, comment })  // if capabilities.mergeRefs
@@ -651,7 +709,18 @@ missing any of them is logged and skipped rather than crashing the server.
   null where the provider does not supply it.
 - **Normalise pull requests to** `{ pullRequestId, title, sourceBranch,
   targetBranch, status, createdBy, url }`. `sourceBranch` is what the UI shows
-  as a commit's provenance, so it matters most.
+  as a commit's provenance, so it matters most. `listPullRequests()` returns
+  only open/active ones and adds `draft`, `createdAt` and `reviewers`; it must
+  not require branch data, so the PR page stays independent of the comparison
+  cache.
+- **Reviewers are** `{ id, name, state, isCurrentUser }`. `state` is one of
+  `approved`, `approved-suggestions`, `awaiting`, `waiting-author` or
+  `rejected`, so Azure's numeric votes and GitHub's pending requests render the
+  same way. Set `isCurrentUser` from the token's own identity — Azure's
+  `currentUserId()` or GitHub's `/user` login — because that is what makes the
+  "awaiting your review" count work. GitHub's `/pulls` only reports review
+  requests that are still outstanding, so its reviewers are always `awaiting`;
+  reading completed reviews would cost one request per PR.
 - **`listCommitsBetween(base, target)` returns what `target` adds over `base`.**
   Get the direction right; it is easy to invert and produces a silently empty
   list rather than an error.
@@ -660,7 +729,9 @@ missing any of them is logged and skipped rather than crashing the server.
   network errors, HTML sign-in pages and rate limits.
 - **Optional metadata must degrade.** `pullRequestsForCommits` is an
   enhancement; return an empty Map rather than throwing when the token cannot
-  read pull requests.
+  read pull requests. `listPullRequests` is the PR page's only source, so a
+  provider without it simply shows an error slot for that repo rather than
+  failing the page.
 
 ### Stored repo records
 

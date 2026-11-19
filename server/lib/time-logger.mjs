@@ -37,7 +37,14 @@ export const DEFAULTS = {
   // How far back "recently worked on" reaches when a new ticket key is checked
   // for typos on the Time logger page. Three weeks covers a fortnight of normal
   // work plus a week away.
-  verifyWindowDays: 21
+  verifyWindowDays: 21,
+  // "Search history" scans the caller's worklog issues over a rolling window.
+  // Jira has no JQL field for worklog text, so every ticket's worklogs have to
+  // be read (one request each); the window and the cap keep a search to seconds
+  // rather than minutes. The scan is cached and dropped after any write.
+  searchMonths: 12,
+  searchMaxIssues: 1500,
+  searchMaxMatches: 200
 }
 
 // ---------------------------------------------------------------- configuration
@@ -375,6 +382,20 @@ function adf (text) {
   }
 }
 
+/**
+ * The `comment` field to send with a worklog PUT.
+ *
+ * Jira's PUT can drop fields the request does not carry, so a comment the caller
+ * did not mention is re-sent from the worklog being updated. A string replaces
+ * it, and an empty one clears it: ADF has no "no comment", so clearing means
+ * sending a document holding a single empty paragraph, which Jira stores as no
+ * comment at all.
+ */
+function commentPatch (existing, comment) {
+  if (typeof comment === 'string') return { comment: adf(comment.trim()) }
+  return existing ? { comment: existing } : {}
+}
+
 // --------------------------------------------------------------- Jira queries
 
 async function searchWorklogIssues (ctx, firstIso, lastIso) {
@@ -472,9 +493,10 @@ async function recentLoggedTickets (ctx, windowDays) {
   return issues
 }
 
-/** Any write can change what counts as recent, so the next check re-reads Jira. */
+/** Any write changes what counts as recent and what a search would find. */
 export function invalidateRecentTickets () {
   recentCache = null
+  historyCache = null
 }
 
 /** The last day (local) the caller logged time to a ticket, or null for never. */
@@ -891,11 +913,11 @@ async function setDayTotal (ctx, ticket, day, hours, comment, existing) {
   }
 
   const keep = items[0]
-  const body = { started: keep.started, timeSpentSeconds: Math.round(hours * 3600) }
-  // A PUT can drop fields it does not carry, so re-send the existing comment
-  // unless the caller supplied a new one.
-  if (comment) body.comment = adf(comment)
-  else if (keep.comment) body.comment = keep.comment
+  const body = {
+    started: keep.started,
+    timeSpentSeconds: Math.round(hours * 3600),
+    ...commentPatch(keep.comment, comment)
+  }
   const updated = await jiraRequest(ctx.site,
     `/issue/${encodeURIComponent(ticket)}/worklog/${encodeURIComponent(keep.id)}`, { method: 'PUT', body })
   events.push([updated.status, `worklog ${keep.id} set to ${updated.data?.timeSpent ?? ''}`])
@@ -973,6 +995,200 @@ export async function rangeReport (from, to) {
   }
 }
 
+// --------------------------------------------------------------------- search
+
+/**
+ * Free-text search over the caller's worklogs, across a rolling window.
+ *
+ * Jira cannot search worklog text: there is no JQL field for a worklog comment,
+ * and `text ~` does not index worklogs (JRACLOUD-7553). So finding a comment
+ * across history means listing the issues the user logged time to and reading
+ * each issue's worklogs — one request per ticket. That is expensive, which is
+ * why the window is capped, the scan is cached, and any write drops the cache.
+ * The page's in-range filter needs none of this: it searches rows already in
+ * the browser.
+ */
+let historyCache = null
+const HISTORY_TTL = 15 * 60 * 1000
+
+/** Lowercase, whitespace-separated terms; every one has to appear. */
+function searchTerms (query) {
+  return String(query || '').toLowerCase().split(/\s+/).filter(Boolean)
+}
+
+function matchesTerms (text, terms) {
+  const haystack = text.toLowerCase()
+  return terms.every(term => haystack.includes(term))
+}
+
+/** One worklog as the search reports it. */
+function searchRow (ctx, ticket, summary, w) {
+  return {
+    ticket,
+    summary,
+    url: `${ctx.site}/browse/${ticket}`,
+    id: w.id,
+    date: localDate(w.started, ctx.tz),
+    started: localTime(w.started, ctx.tz),
+    hours: round2(w.timeSpentSeconds / 3600),
+    comment: commentText(w.comment)
+  }
+}
+
+/** The caller's worklogs on one ticket within the window. */
+async function ticketHistory (ctx, key, first, last) {
+  const summary = await summaryOf(ctx, key)
+  const worklogs = await fetchWorklogs(ctx, key)
+  const items = []
+  for (const w of worklogs) {
+    if (w.author?.accountId !== ctx.accountId) continue
+    const row = searchRow(ctx, key, summary, w)
+    if (!row.date || row.date < first.iso || row.date > last.iso) continue
+    items.push(row)
+  }
+  return { scannedIssues: 1, items }
+}
+
+/** The caller's worklogs on every ticket they touched in the window. */
+async function worklogHistory (ctx, first, last) {
+  const now = Date.now()
+  if (
+    historyCache &&
+    historyCache.site === ctx.site &&
+    historyCache.accountId === ctx.accountId &&
+    historyCache.from === first.iso &&
+    historyCache.to === last.iso &&
+    now - historyCache.at < HISTORY_TTL
+  ) {
+    return historyCache.value
+  }
+
+  const issues = await searchWorklogIssues(ctx, first.iso, last.iso)
+  const keys = Object.keys(issues).sort()
+  if (keys.length > DEFAULTS.searchMaxIssues) {
+    throw new TimeLoggerError(
+      `${keys.length} tickets carry your time in the last ${DEFAULTS.searchMonths} months; ` +
+        `scanning them all would take too long (limit ${DEFAULTS.searchMaxIssues})`,
+      { hint: 'Load a shorter date range and filter the days shown instead.' }
+    )
+  }
+
+  const items = []
+  await mapLimit(keys, DEFAULTS.workers, async (key) => {
+    let worklogs
+    try {
+      worklogs = await fetchWorklogs(ctx, key)
+    } catch {
+      // One unreadable ticket must not fail the whole search.
+      return
+    }
+    for (const w of worklogs) {
+      if (w.author?.accountId !== ctx.accountId) continue
+      const row = searchRow(ctx, key, issues[key] || '', w)
+      if (!row.date || row.date < first.iso || row.date > last.iso) continue
+      items.push(row)
+    }
+  })
+
+  const value = { scannedIssues: keys.length, items }
+  historyCache = {
+    site: ctx.site, accountId: ctx.accountId,
+    from: first.iso, to: last.iso, at: now, value
+  }
+  return value
+}
+
+/**
+ * Group matched worklogs into day buckets, newest day first and entries in the
+ * order they were logged. The page renders them grouped, and one click loads a
+ * day back into the editable range view.
+ */
+function searchDays (rows) {
+  const days = []
+  let current = null
+  for (const row of rows) {
+    if (!current || current.date !== row.date) {
+      const day = parseIsoDay(row.date, 'date')
+      current = { date: row.date, label: labelFor(day), weekend: isWeekend(day), matches: [] }
+      days.push(current)
+    }
+    current.matches.push({
+      ticket: row.ticket,
+      summary: row.summary,
+      url: row.url,
+      id: row.id,
+      hours: row.hours,
+      started: row.started,
+      comment: row.comment
+    })
+  }
+  return days
+}
+
+export async function searchWorklogs (query, { months } = {}) {
+  const raw = String(query || '').trim()
+  const terms = searchTerms(raw)
+  if (terms.join(' ').length < 2) {
+    throw new TimeLoggerError('search needs at least two characters')
+  }
+  const cfg = await config()
+  requireConfig(cfg)
+  const ctx = await buildCtx(cfg)
+
+  const span = Number(months)
+  const windowMonths = Number.isFinite(span) && span >= 1 && span <= 24
+    ? Math.round(span)
+    : DEFAULTS.searchMonths
+  const last = parseIsoDay(localDate(new Date().toISOString(), ctx.tz), 'today')
+  const first = addDays(last, -Math.round((windowMonths * 365) / 12))
+
+  // A bare ticket key is one issue's worklogs, not a scan of everything.
+  const key = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(raw) ? raw.toUpperCase() : null
+
+  let scan
+  try {
+    scan = key
+      ? await ticketHistory(ctx, key, first, last)
+      : await worklogHistory(ctx, first, last)
+  } catch (err) {
+    // A key that does not exist is an empty search, not a server failure.
+    if (key && err.status === 404) {
+      return {
+        query: raw,
+        from: first.iso,
+        to: last.iso,
+        months: windowMonths,
+        scannedIssues: 0,
+        matched: 0,
+        truncated: false,
+        unknownTicket: key,
+        days: []
+      }
+    }
+    throw err
+  }
+
+  const matched = scan.items
+    .filter(row => matchesTerms(`${row.ticket} ${row.summary} ${row.comment || ''}`, terms))
+    .sort((a, b) =>
+      b.date.localeCompare(a.date) ||
+      String(a.started).localeCompare(String(b.started)) ||
+      a.ticket.localeCompare(b.ticket) ||
+      String(a.id).localeCompare(String(b.id)))
+  const truncated = matched.length > DEFAULTS.searchMaxMatches
+
+  return {
+    query: raw,
+    from: first.iso,
+    to: last.iso,
+    months: windowMonths,
+    scannedIssues: scan.scannedIssues,
+    matched: matched.length,
+    truncated,
+    days: searchDays(truncated ? matched.slice(0, DEFAULTS.searchMaxMatches) : matched)
+  }
+}
+
 // ------------------------------------------------------------------- endpoints
 
 /** Insert: add `hours` on top of whatever is already logged. */
@@ -1000,7 +1216,7 @@ export async function updateWorklog ({ ticket, date, hours, comment }) {
   const key = cleanTicket(ticket, cfg.project)
   const day = parseIsoDay(date, 'date')
   const amount = cleanHours(hours, { allowZero: true })
-  const note = typeof comment === 'string' ? comment.trim() || null : null
+  const note = typeof comment === 'string' ? comment.trim() : null
   const ctx = await buildCtx(cfg)
   const { events } = await setDayTotal(ctx, key, day, amount, note)
   invalidateRecentTickets()
@@ -1034,22 +1250,28 @@ async function ownWorklog (ctx, ticket, day, id) {
   return found
 }
 
-/** Update one worklog in place, leaving the day's other entries alone. */
+/**
+ * Update one worklog in place, leaving the day's other entries alone.
+ *
+ * `comment` is optional: omitted keeps whatever the worklog already carries,
+ * a string replaces it (trimmed), and an empty string removes it — the page's
+ * inline comment editor uses that to clear a comment without deleting the entry.
+ */
 export async function updateWorklogEntry ({ ticket, date, id, hours, comment }) {
   const cfg = await config()
   requireConfig(cfg)
   const key = cleanTicket(ticket, cfg.project)
   const day = parseIsoDay(date, 'date')
   const amount = cleanHours(hours)
-  const note = typeof comment === 'string' ? comment.trim() || null : null
+  const note = typeof comment === 'string' ? comment : null
   const ctx = await buildCtx(cfg)
   const target = await ownWorklog(ctx, key, day, id)
 
-  const body = { started: target.started, timeSpentSeconds: Math.round(amount * 3600) }
-  // A PUT can drop fields it does not carry, so re-send the existing comment
-  // unless the caller supplied a new one.
-  if (note) body.comment = adf(note)
-  else if (target.comment) body.comment = target.comment
+  const body = {
+    started: target.started,
+    timeSpentSeconds: Math.round(amount * 3600),
+    ...commentPatch(target.comment, note)
+  }
   const updated = await jiraRequest(ctx.site,
     `/issue/${encodeURIComponent(key)}/worklog/${encodeURIComponent(target.id)}`,
     { method: 'PUT', body })

@@ -3,6 +3,11 @@ import { badRequest } from '../../lib/provider-error.mjs'
 
 const enc = encodeURIComponent
 const PR_LOOKUP_LIMIT = 250
+const PR_LIST_LIMIT = 300
+
+// The token's login never changes for the life of the process. Keyed by host
+// because github.com and an enterprise install are different accounts.
+const viewerCache = new Map()
 
 const AUTH_HINT = host => `Add a line to ~/.authinfo:
   machine ${host} login <your-username> password <personal-access-token>
@@ -66,6 +71,52 @@ async function paged (coords, path, params, collect) {
   }
 }
 
+/** The token's own login, used to mark a requested reviewer as "You". */
+async function viewerLogin (coords) {
+  if (viewerCache.has(coords.host)) return viewerCache.get(coords.host)
+  const requestHeaders = await headers(coords.host)
+  if (!requestHeaders.Authorization) {
+    viewerCache.set(coords.host, null)
+    return null
+  }
+  try {
+    const { payload } = await requestJson(new URL(`${apiRoot(coords.host)}/user`), {
+      host: coords.host,
+      authHint: AUTH_HINT(coords.host),
+      headers: requestHeaders
+    })
+    const login = payload.login || null
+    viewerCache.set(coords.host, login)
+    return login
+  } catch {
+    // The PR list still works; it just cannot say which reviewer is you.
+    return null
+  }
+}
+
+/**
+ * `/pulls` lists only the review requests still outstanding: once someone
+ * approves, GitHub drops them from `requested_reviewers`. That is exactly the
+ * "who still needs to look at this" view, so no per-PR reviews call is needed.
+ */
+function requestedReviewers (pr, viewer) {
+  const reviewers = (pr.requested_reviewers || []).map(user => ({
+    id: user.id ? String(user.id) : user.login,
+    name: user.login || user.name || 'Unknown',
+    state: 'awaiting',
+    isCurrentUser: Boolean(viewer && user.login === viewer)
+  }))
+  for (const team of pr.requested_teams || []) {
+    reviewers.push({
+      id: team.id ? `team:${team.id}` : `team:${team.slug}`,
+      name: `${team.name || team.slug || 'Team'} (team)`,
+      state: 'awaiting',
+      isCurrentUser: false
+    })
+  }
+  return reviewers
+}
+
 function normaliseCommit (entry) {
   const commit = entry.commit || {}
   return {
@@ -107,6 +158,7 @@ const plugin = {
   urlExample: 'https://github.com/{owner}/{repo}',
   capabilities: {
     pullRequests: true,
+    pullRequestList: true,
     diffCounts: true,
     // GitHub has no cherry-pick endpoint; the UI falls back to git commands.
     cherryPick: false
@@ -181,6 +233,38 @@ const plugin = {
       baseCommit: payload.merge_base_commit?.sha || null,
       targetCommit: payload.commits?.at(-1)?.sha || null
     }
+  },
+
+  /**
+   * Open pull requests, one page per hundred. Unlike the per-commit lookup,
+   * this is the same cost for a repository whether it has one open PR or a
+   * hundred, so it is the cheap way to build the cross-repo PR view.
+   */
+  async listPullRequests (coords) {
+    const raw = []
+    await paged(coords, '/pulls', {
+      state: 'open', per_page: 100, sort: 'created', direction: 'desc'
+    }, page => {
+      raw.push(...page)
+      if (raw.length >= PR_LIST_LIMIT) return false
+    })
+
+    const pulls = raw.slice(0, PR_LIST_LIMIT)
+    if (!pulls.length) return []
+    const viewer = await viewerLogin(coords)
+
+    return pulls.map(pr => ({
+      pullRequestId: pr.number,
+      title: pr.title || '',
+      status: 'active',
+      draft: Boolean(pr.draft),
+      sourceBranch: pr.head?.ref || null,
+      targetBranch: pr.base?.ref || '',
+      createdBy: pr.user?.login || null,
+      createdAt: pr.created_at || null,
+      reviewers: requestedReviewers(pr, viewer),
+      url: pr.html_url || plugin.pullRequestWebUrl(coords, pr.number)
+    }))
   },
 
   /**

@@ -39,7 +39,10 @@ export function stripPrefix (branch, prefix) {
 
 /**
  * Collapses per-repo branch lists into one release list:
- *   [{ version, branch, repos: [repoId], missing: [repoId] }]
+ *   [{ version, branch, repos: [repoId], missing: [repoId], tips, urls }]
+ *
+ * `tips` and `urls` are keyed by repo id so a caller can show, per repository,
+ * which commit the release branch points at and link straight to the branch.
  */
 export function collateReleases (perRepo, prefix) {
   const byVersion = new Map()
@@ -51,11 +54,12 @@ export function collateReleases (perRepo, prefix) {
       if (!branch.name.startsWith(prefix)) continue
       const version = stripPrefix(branch.name, prefix)
       if (!byVersion.has(version)) {
-        byVersion.set(version, { version, branch: branch.name, repos: [], tips: {} })
+        byVersion.set(version, { version, branch: branch.name, repos: [], tips: {}, urls: {} })
       }
       const entry = byVersion.get(version)
       entry.repos.push(repoId)
       entry.tips[repoId] = branch.objectId
+      entry.urls[repoId] = branch.url || null
     }
   }
 

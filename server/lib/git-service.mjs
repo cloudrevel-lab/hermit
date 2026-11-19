@@ -1,7 +1,8 @@
 import { cached, TTL } from './cache.mjs'
 import { getDb } from './db.mjs'
+import { mapLimit } from './http.mjs'
 import { extractIssueKeys } from './jira.mjs'
-import { enabledRepos, publicRepo, repoWithPlugin } from './repos.mjs'
+import { listRepos, enabledRepos, publicRepo, repoWithPlugin } from './repos.mjs'
 import { collateReleases } from './versions.mjs'
 
 function describeError (err) {
@@ -87,7 +88,13 @@ async function allBranches ({ refresh = false } = {}) {
       const { plugin } = await repoWithPlugin(repo.id)
       const { value } = await cached(`refs:${repo.id}`, refresh ? 0 : TTL.refs,
         () => plugin.listBranches(repo.coords))
-      return { repoId: repo.id, repo: summary, branches: value }
+      // The web URL is derived after the cache so a provider URL change does
+      // not need the cached branch list cleared.
+      return {
+        repoId: repo.id,
+        repo: summary,
+        branches: value.map(branch => ({ ...branch, url: plugin.branchWebUrl(repo.coords, branch.name) }))
+      }
     } catch (err) {
       return { repoId: repo.id, repo: summary, branches: [], error: describeError(err) }
     }
@@ -103,6 +110,70 @@ export async function releaseOverview ({ refresh = false } = {}) {
     repos: perRepo.map(r => ({ ...r.repo, error: r.error || null, branchCount: r.branches.length })),
     releases: collateReleases(perRepo, prefix),
     errors: perRepo.filter(r => r.error).map(r => ({ repo: r.repo.name, ...r.error }))
+  }
+}
+
+/**
+ * Active pull requests from every registered repository, with one result per
+ * repo so a bad credential or a rate limit on one of them cannot hide the rest.
+ *
+ * This includes disabled repositories: the enable switch only scopes release
+ * comparisons, and a PR can still need attention on a repo that is not part of
+ * the release currently being prepared.
+ */
+export async function activePullRequests ({ refresh = false } = {}) {
+  const repos = await listRepos()
+
+  // Repos are independent, but a large install would otherwise fan out one
+  // provider request per repo at once. Four at a time keeps a GitHub rate-limit
+  // failure local rather than turning it into a stampede.
+  const results = await mapLimit(repos, 4, async repo => {
+    const summary = await publicRepo(repo)
+    try {
+      const { plugin } = await repoWithPlugin(repo.id)
+      if (!plugin.capabilities.pullRequestList || typeof plugin.listPullRequests !== 'function') {
+        const err = new Error(`${plugin.name} cannot list pull requests`)
+        err.status = 400
+        err.hint = 'The provider plugin does not expose an active pull-request listing.'
+        throw err
+      }
+
+      const { value, cached: fromCache, at } = await cached(
+        `pulls:v2:${repo.id}`,
+        refresh ? 0 : TTL.pullRequests,
+        () => plugin.listPullRequests(repo.coords)
+      )
+
+      const pullRequests = [...value].sort((a, b) => {
+        const byAge = String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+        return byAge || b.pullRequestId - a.pullRequestId
+      }).map(pr => ({
+        ...pr,
+        // Whoever is signed in comes first, so a long reviewer list cannot push
+        // "you" below the fold.
+        reviewers: [...(pr.reviewers || [])].sort((a, b) =>
+          Number(b.isCurrentUser) - Number(a.isCurrentUser) ||
+          String(a.name || '').localeCompare(String(b.name || ''))
+        )
+      }))
+
+      return {
+        repoId: repo.id,
+        repo: summary,
+        status: 'ok',
+        pullRequests,
+        cached: fromCache,
+        fetchedAt: new Date(at).toISOString()
+      }
+    } catch (err) {
+      return { repoId: repo.id, repo: summary, status: 'error', ...describeError(err) }
+    }
+  })
+
+  return {
+    repos: results,
+    total: results.reduce((sum, result) => sum + (result.pullRequests?.length || 0), 0),
+    fetchedAt: new Date().toISOString()
   }
 }
 

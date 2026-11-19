@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import {
-  deleteWorklogEntry, getContext, insertWorklog, rangeReport, updateWorklog, updateWorklogEntry,
-  verifyTicket
+  deleteWorklogEntry, getContext, insertWorklog, rangeReport, searchWorklogs, updateWorklog,
+  updateWorklogEntry, verifyTicket
 } from '../lib/time-logger.mjs'
 
 // Jira worklogs for the Time logger page. Reads are harmless; the POST/PUT
@@ -21,6 +21,15 @@ timeLoggerRouter.get('/range', async (req, res, next) => {
 // consulted when the ticket field loses focus; it never writes to Jira.
 timeLoggerRouter.get('/verify', async (req, res, next) => {
   try { res.json(await verifyTicket(req.query.ticket)) } catch (err) { next(err) }
+})
+
+// Free-text search across the caller's worklogs in a rolling window. Read-only,
+// but it can take a few seconds: Jira cannot search worklog text, so each of the
+// caller's tickets has to be read. `?months=` narrows the window.
+timeLoggerRouter.get('/search', async (req, res, next) => {
+  try {
+    res.json(await searchWorklogs(req.query.q, { months: req.query.months }))
+  } catch (err) { next(err) }
 })
 
 // Insert: add hours on top of what is already logged.

@@ -3,7 +3,7 @@ import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { notify, notifyError } from '../composables/useToast'
 import { readStored, writeStored } from '../composables/useStored'
-import { readCachedResult, writeCachedResult } from '../composables/useResultCache'
+import { clearCachedResult, readCachedResult, writeCachedResult } from '../composables/useResultCache'
 import { relativeTime, shortDate } from '../composables/useFormat'
 import CommitRow from '../components/CommitRow.vue'
 import EmptyHint from '../components/EmptyHint.vue'
@@ -191,6 +191,20 @@ async function runCompare (refresh = false) {
 }
 
 /**
+ * Returns to the coverage grid without changing the selected pair. The snapshot
+ * for this exact comparison is dropped so a reload stays on the grid instead of
+ * putting the dismissed result back; the pair itself is still remembered, so
+ * Compare re-runs it. The Jira card is cleared so the next comparison cannot
+ * briefly show the previous run's issues.
+ */
+function showCoverage () {
+  clearCachedResult(compareKey.value)
+  comparison.value = null
+  restoredAt.value = null
+  jira.value = { loading: false, version: null, issues: [], byKey: {}, host: '' }
+}
+
+/**
  * Persists the comparison together with whatever cross-check is on screen, so
  * leaving the page and coming back (or reloading) does not ask for the same
  * Jira lookup again. Writes under `key` when given, because a compare captures
@@ -360,6 +374,15 @@ onActivated(() => {
         <div class="d-flex align-center ga-2 mb-3">
           <span class="section-label">Compare releases</span>
           <v-spacer />
+          <v-btn
+            v-if="comparison && !comparing"
+            size="small"
+            variant="tonal"
+            prepend-icon="mdi-arrow-left"
+            @click="showCoverage"
+          >
+            Back to coverage
+          </v-btn>
           <v-btn size="small" variant="text" prepend-icon="mdi-refresh" :loading="loading" @click="load(true)">
             Refresh branches
           </v-btn>

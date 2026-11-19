@@ -9,6 +9,18 @@ const routes = [
     meta: { title: 'Release compare', icon: 'mdi-rocket-launch-outline', nav: true }
   },
   {
+    path: '/release-repositories',
+    name: 'release-repositories',
+    component: () => import('./pages/ReleaseRepositoriesPage.vue'),
+    meta: { title: 'Release repositories', icon: 'mdi-tag-multiple-outline', nav: true }
+  },
+  {
+    path: '/pull-requests',
+    name: 'pull-requests',
+    component: () => import('./pages/PullRequestsPage.vue'),
+    meta: { title: 'Pull requests', icon: 'mdi-source-pull', nav: true }
+  },
+  {
     path: '/cherry-pick',
     name: 'cherry-pick',
     component: () => import('./pages/CherryPickPage.vue'),
