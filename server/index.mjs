@@ -41,7 +41,14 @@ app.use((req, res) => res.status(404).json({ error: `No route for ${req.method} 
 app.use((err, req, res, next) => {
   const status = err.status || 500
   if (status >= 500) console.error(`[error] ${req.method} ${req.path}:`, err)
-  res.status(status).json({ error: err.message || 'Unexpected error', hint: err.hint || null })
+  res.status(status).json({
+    error: err.message || 'Unexpected error',
+    hint: err.hint || null,
+    // `code` and `details` let the UI offer a supported alternative instead of
+    // matching on an error message: e.g. open the merge as a pull request.
+    ...(err.code ? { code: err.code } : {}),
+    ...(err.details ? { details: err.details } : {})
+  })
 })
 
 /**

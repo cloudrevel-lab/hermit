@@ -238,6 +238,7 @@ cannot delay the others.
 | GET | `/api/git/repos/:id/branches` | Branch list for one repo |
 | POST | `/api/git/cherry-pick` | Apply commits to a new topic branch, optionally via a PR. Gated, and provider must support it |
 | POST | `/api/git/merge-branches` | Merge a whole source branch into the target, keeping commit ids. Gated |
+| POST | `/api/git/pull-requests` | Open a pull request between two branches; the fallback when branch policy refuses a direct merge. Gated |
 | POST | `/api/jira/version` | Issues in a fixVersion, from a release URL or id |
 | GET | `/api/jira/versions` | Fix Versions defined on the project, for the picker |
 | GET/POST | `/api/jira/releases` | Pinned Fix Versions |
@@ -255,7 +256,11 @@ cannot delay the others.
 
 Errors are `{ error, hint }` with a meaningful status. `hint` is a longer,
 multi-line remedy shown in the UI — use it for anything the user can fix, such
-as a missing credential.
+as a missing credential. A failure with a supported alternative also carries
+`code` and `details` (`{ error, hint, code, details }`), which the UI uses to
+offer an action instead of pattern-matching on the message: for example
+`direct-merge-blocked` carries the refs so the dialog can open the merge as a
+pull request.
 
 ## Gotchas
 
@@ -321,8 +326,15 @@ cannot cherry-pick. Azure has no single call for it:
 The merge endpoint only builds the commit; it never moves a branch, so the ref
 update is always the last step. It is sparsely documented, and a conflict comes
 back as a failed operation with a `failureMessage` rather than a resolution to
-attempt, so the dialog's git commands are the fallback. The ref update bypasses
-branch policies, which is why this is its own opt-in setting.
+attempt, so the dialog's git commands are the fallback.
+
+The ref update does **not** bypass branch policies: a branch whose policy
+requires pull requests rejects the update (HTTP 200 with a per-ref
+`success: false` and Azure's `TF402455` message). `updateRef()` classifies that
+as `code: 'branch-policy'`; `mergeSourceBranch()` turns it into
+`direct-merge-blocked` with the refs and a `pullRequestFallback` flag, and the
+cherry-pick dialog offers **Create pull request** instead of only reporting the
+failure. That is also why this stays its own opt-in setting.
 
 ### GitHub: no cherry-pick, and a 60/hour anonymous ceiling
 
@@ -669,7 +681,7 @@ export default {
   icon: 'mdi-bitbucket',        // any mdi name
   color: '#2684FF',
   urlExample: 'https://bitbucket.org/{workspace}/{repo}',
-  capabilities: { pullRequests: true, pullRequestList: true, diffCounts: true, cherryPick: false, mergeRefs: false },
+  capabilities: { pullRequests: true, pullRequestList: true, diffCounts: true, cherryPick: false, pullRequestWrites: false, mergeRefs: false },
 
   matchesUrl (url),             // URL object -> boolean. Cheap host test
   parseUrl (url),               // -> coords, an opaque provider-specific object
@@ -689,7 +701,9 @@ export default {
   async listPullRequests (coords),                     // if capabilities.pullRequestList
   async createCherryPick (coords, { commitIds, ontoRef, topicBranch }),  // if capabilities.cherryPick
   async getBranchTip (coords, branch),                 // if capabilities.mergeRefs
-  async mergeSourceInto (coords, { sourceRef, targetRef, comment })  // if capabilities.mergeRefs
+  async mergeSourceInto (coords, { sourceRef, targetRef, comment }),  // if capabilities.mergeRefs
+  async createPullRequest (coords, { sourceRef, targetRef, title, description }),  // if capabilities.pullRequestWrites
+  async setPullRequestAutoComplete (coords, pullRequestId)  // if capabilities.pullRequestWrites
 }
 ```
 

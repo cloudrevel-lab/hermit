@@ -416,11 +416,18 @@ whole branch instead of cherry-picking:
 
 The source-branch merge is the only option that skips the pull request, so it is
 a separate opt-in (**Merge branches directly into the target branch** in
-Settings) and bypasses branch policies. It merges the **whole** source branch —
-select every commit on that side to use it. When the target is behind the source
-it fast-forwards with no merge commit; when the branches have diverged Azure
-builds one merge commit. Either way the original commits keep their ids, so the
-comparison no longer reports them as missing.
+Settings). It merges the **whole** source branch — select every commit on that
+side to use it. When the target is behind the source it fast-forwards with no
+merge commit; when the branches have diverged Azure builds one merge commit.
+Either way the original commits keep their ids, so the comparison no longer
+reports them as missing.
+
+A target branch whose policy requires pull requests still refuses the final ref
+update (Azure's `TF402455`). When that happens the dialog stays open and offers
+**Create pull request** — both in the error and in the snackbar — which opens
+the same source → target merge as a pull request. Completing it with a **merge
+commit** (not a squash) preserves the commit ids, exactly like the direct merge
+would have.
 
 Every dialog also has a **Prompt for an AI tool** section: a ready-to-paste
 brief naming the repository, the source and target branches and the exact

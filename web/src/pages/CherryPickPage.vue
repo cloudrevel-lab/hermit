@@ -52,6 +52,14 @@ const jiraHost = computed(() => {
 const applying = ref(false)
 const topicBranch = ref('')
 const landMode = ref('auto')
+// Set when a direct merge was refused by branch policy. The same source ->
+// target move is allowed as a pull request, so the dialog offers that instead.
+const blockedMerge = ref(null)
+const openingPr = ref(false)
+
+// A closed or switched dialog must not leave a stale refusal alert behind.
+watch(applyDialog, dialog => { if (!dialog) blockedMerge.value = null })
+watch(landMode, mode => { if (mode !== 'source') blockedMerge.value = null })
 
 // How far the console carries the commits. The cherry-pick modes land them on a
 // topic branch first; "source" merges the whole branch instead, which keeps the
@@ -386,11 +394,13 @@ async function applyViaApi () {
       notify(res.warning.message, { color: 'warning', hint: res.warning.hint })
     } else if (res.pullRequest?.autoComplete) {
       notify(`PR !${res.pullRequest.pullRequestId} will merge into ${ontoRef}`, {
-        hint: 'It completes as soon as branch policies pass. The picked commits arrive with new commit ids, so this branch pair will still look divergent afterwards.'
+        hint: 'It completes as soon as branch policies pass. The picked commits arrive with new commit ids, so this branch pair will still look divergent afterwards.',
+        action: { label: 'Open pull request', href: res.pullRequest.url }
       })
     } else if (res.pullRequest) {
       notify(`PR !${res.pullRequest.pullRequestId} opened into ${ontoRef}`, {
-        hint: 'Review and complete it in Azure DevOps.'
+        hint: 'Review and complete it in Azure DevOps.',
+        action: { label: 'Open pull request', href: res.pullRequest.url }
       })
     } else {
       notify(`Cherry-pick started on ${res.topicBranch}`, {
@@ -401,9 +411,89 @@ async function applyViaApi () {
     applyDialog.value = null
     await compare(true)
   } catch (err) {
-    notifyError(err)
+    // Branch policy can refuse the ref update a direct merge needs (Azure's
+    // TF402455). That refusal has a supported alternative, so offer it rather
+    // than only reporting the push failure.
+    if (landMode.value === 'source' && err.code === 'direct-merge-blocked') {
+      offerPullRequestFallback(err)
+    } else {
+      notifyError(err)
+    }
   } finally {
     applying.value = false
+  }
+}
+
+/**
+ * Remembers what was being merged and puts "Create pull request" in both the
+ * snackbar and the still-open dialog, so the action survives the snackbar's
+ * timeout. The refs and repo are captured here: the dialog must not have to
+ * still be open when the button is clicked.
+ */
+function offerPullRequestFallback (err) {
+  const dialog = applyDialog.value
+  if (!dialog) return notifyError(err)
+  const fallback = Boolean(err.details?.pullRequestFallback)
+  const blocked = {
+    repoId: repoId.value,
+    sourceRef: dialog.fromRef,
+    targetRef: dialog.ontoRef,
+    commits: dialog.commits,
+    hint: err.hint,
+    reason: err.details?.reason || null,
+    canOpenPullRequest: fallback
+  }
+  blockedMerge.value = blocked
+  notify(err.message, {
+    color: 'error',
+    hint: err.hint,
+    action: fallback
+      ? { label: 'Create pull request', run: () => openFallbackPullRequest(blocked) }
+      : null
+  })
+}
+
+function pullRequestDescription (blocked) {
+  return [
+    `Merge ${blocked.sourceRef} into ${blocked.targetRef}.`,
+    '',
+    'Opened from the Hermit console after branch policy refused the direct push.',
+    'Completing it with a merge commit (not a squash) keeps the original commit ids.',
+    '',
+    `Commits brought in (${blocked.commits.length}), oldest first:`,
+    ...blocked.commits.map(c => `- ${c.commitId} ${c.message.split('\n')[0]}`)
+  ].join('\n')
+}
+
+/**
+ * Opens the PR the refused merge was trying to perform. Its completion merges
+ * the whole source branch, so the commits keep their ids — unlike the
+ * cherry-pick modes, which would land copies with new ids.
+ */
+async function openFallbackPullRequest (blocked = blockedMerge.value) {
+  if (!blocked || openingPr.value) return
+  openingPr.value = true
+  try {
+    const res = await api.openPullRequest({
+      repoId: blocked.repoId,
+      sourceRef: blocked.sourceRef,
+      targetRef: blocked.targetRef,
+      title: `Merge ${blocked.sourceRef} into ${blocked.targetRef}`,
+      description: pullRequestDescription(blocked)
+    })
+    lastResult.value = { pullRequest: res.pullRequest, sourceRef: blocked.sourceRef, targetRef: blocked.targetRef }
+    if (blockedMerge.value === blocked) blockedMerge.value = null
+    if (applyDialog.value?.fromRef === blocked.sourceRef && applyDialog.value?.ontoRef === blocked.targetRef) {
+      applyDialog.value = null
+    }
+    notify(`PR !${res.pullRequest.pullRequestId} opened into ${blocked.targetRef}`, {
+      hint: `Complete it in ${activeRepo.value?.providerName || 'the provider'} with a merge commit to keep the original commit ids.`,
+      action: { label: 'Open pull request', href: res.pullRequest.url }
+    })
+  } catch (err) {
+    notifyError(err)
+  } finally {
+    openingPr.value = false
   }
 }
 
@@ -627,8 +717,27 @@ onActivated(() => {
             <strong>No pull request and no review.</strong> The whole source branch is merged, so any
             commit it has that <span class="mono">{{ applyDialog.ontoRef }}</span> lacks comes along.
             The commit ids are preserved — when the branches have diverged this adds one merge commit,
-            otherwise <span class="mono">{{ applyDialog.ontoRef }}</span> fast-forwards. Branch
-            policies are bypassed.
+            otherwise <span class="mono">{{ applyDialog.ontoRef }}</span> fast-forwards. A target
+            branch whose policy requires pull requests will refuse the push.
+          </v-alert>
+
+          <v-alert v-if="blockedMerge" type="error" density="compact">
+            <div class="font-weight-medium">Direct merge was refused</div>
+            <div class="text-body-small mt-1">{{ blockedMerge.hint }}</div>
+            <div v-if="blockedMerge.reason" class="text-body-small mt-1 text-medium-emphasis">
+              {{ blockedMerge.reason }}
+            </div>
+            <div class="d-flex align-center ga-3 mt-3 flex-wrap">
+              <v-btn v-if="blockedMerge.canOpenPullRequest" size="small" color="primary"
+                     prepend-icon="mdi-source-pull" :loading="openingPr"
+                     @click="openFallbackPullRequest()">
+                Create pull request
+              </v-btn>
+              <span class="text-body-small text-medium-emphasis">
+                from <span class="mono">{{ blockedMerge.sourceRef }}</span>
+                into <span class="mono">{{ blockedMerge.targetRef }}</span>
+              </span>
+            </div>
           </v-alert>
 
           <v-text-field v-if="landMode !== 'source'" v-model="topicBranch"

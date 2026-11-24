@@ -87,6 +87,24 @@ function normaliseReviewers (pr, viewerId) {
     }))
 }
 
+/**
+ * Azure answers a ref update with HTTP 200 even when the update is refused:
+ * the per-ref result carries `success: false`, an `updateStatus` and a
+ * `customMessage`. A policy refusal (TF402455 — the branch requires a pull
+ * request) is the one case with a supported alternative, so it gets its own
+ * code rather than only a message the UI would have to pattern-match.
+ */
+export function refUpdateFailure (branch, result) {
+  const reason = `${result.updateStatus || ''} ${result.customMessage || ''}`
+  const blockedByPolicy = /policy|TF402455|not permitted|pull request/i.test(reason)
+  return new ProviderError(`Azure DevOps refused to move ${branch}`, {
+    status: 409,
+    code: blockedByPolicy ? 'branch-policy' : 'ref-update-rejected',
+    details: { branch, updateStatus: result.updateStatus || null },
+    hint: result.customMessage || `The ref update was ${result.updateStatus}. Check branch permissions and locks.`
+  })
+}
+
 const plugin = {
   id: 'azure-devops',
   name: 'Azure DevOps',
@@ -380,12 +398,7 @@ const plugin = {
       body: [{ name: `refs/heads/${branch}`, oldObjectId, newObjectId }]
     })
     const result = (payload.value || [])[0]
-    if (result && result.success === false) {
-      throw new ProviderError(`Azure DevOps refused to move ${branch}`, {
-        status: 409,
-        hint: result.customMessage || `The ref update was ${result.updateStatus}. Check branch permissions and locks.`
-      })
-    }
+    if (result && result.success === false) throw refUpdateFailure(branch, result)
     return result || null
   },
 

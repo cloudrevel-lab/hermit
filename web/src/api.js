@@ -11,6 +11,10 @@ async function call (path, { method = 'GET', body, signal } = {}) {
     const err = new Error(payload.error || `Request failed (${res.status})`)
     err.hint = payload.hint
     err.status = res.status
+    // A code means the failure has a supported alternative (e.g. open the
+    // merge as a pull request); details carry what that alternative needs.
+    err.code = payload.code
+    err.details = payload.details
     throw err
   }
   return payload
@@ -45,6 +49,8 @@ export const api = {
   compareRefs: (payload) => call('/git/compare-refs', { method: 'POST', body: payload }),
   cherryPick: (payload) => call('/git/cherry-pick', { method: 'POST', body: payload }),
   mergeBranches: (payload) => call('/git/merge-branches', { method: 'POST', body: payload }),
+  // The supported alternative when branch policy refuses a direct merge.
+  openPullRequest: (payload) => call('/git/pull-requests', { method: 'POST', body: payload }),
 
   jiraVersion: (payload) => call('/jira/version', { method: 'POST', body: payload }),
   jiraProjectVersions: (refresh) => call(`/jira/versions${refresh ? '?refresh=1' : ''}`),

@@ -5,7 +5,7 @@ import { useTheme } from 'vuetify'
 import { navRoutes } from './router'
 import { api } from './api'
 import { rememberTheme } from './plugins/vuetify'
-import { toast } from './composables/useToast'
+import { toast, runToastAction, dismissToast } from './composables/useToast'
 import { setDisplayTimezone } from './composables/useFormat'
 
 const route = useRoute()
@@ -163,9 +163,22 @@ onMounted(async () => {
       </router-view>
     </v-main>
 
-    <v-snackbar v-model="toast.show" :color="toast.color" location="bottom right" :timeout="toast.hint ? 9000 : 4500">
+    <v-snackbar v-model="toast.show" :color="toast.color" location="bottom right"
+                :timeout="toast.action ? 15000 : toast.hint ? 9000 : 4500">
       <div class="font-weight-medium">{{ toast.text }}</div>
       <div v-if="toast.hint" class="text-body-small mt-1" style="white-space: pre-line">{{ toast.hint }}</div>
+      <template v-if="toast.action" #actions>
+        <!-- A surface-coloured button rather than a text button: the snackbar's
+             error colour is light, so white-on-red text is hard to read. -->
+        <v-btn v-if="toast.action.href" variant="flat" color="surface" size="small"
+               :href="toast.action.href" target="_blank" rel="noopener"
+               append-icon="mdi-open-in-new" @click="dismissToast">
+          {{ toast.action.label }}
+        </v-btn>
+        <v-btn v-else variant="flat" color="surface" size="small" @click="runToastAction">
+          {{ toast.action.label }}
+        </v-btn>
+      </template>
     </v-snackbar>
   </v-app>
 </template>

@@ -349,10 +349,63 @@ export async function mergeSourceBranch ({ repoId, sourceRef, targetRef }) {
     err.status = 400
     throw err
   }
-  const result = await plugin.mergeSourceInto(repo.coords, {
+  let result
+  try {
+    result = await plugin.mergeSourceInto(repo.coords, {
+      sourceRef,
+      targetRef,
+      comment: `Merge ${sourceRef} into ${targetRef}`
+    })
+  } catch (err) {
+    // Branch policy can refuse the ref update that lands the merge. The same
+    // branch move is allowed through a pull request, so mark the failure as
+    // actionable and carry what the fallback needs.
+    if (err.code === 'branch-policy') {
+      const reason = err.hint || null
+      err.code = 'direct-merge-blocked'
+      err.status = 409
+      err.hint = `Branch policy requires a pull request to update ${targetRef}. ` +
+        `Open one from ${sourceRef} into ${targetRef} instead, or run the merge locally.`
+      err.details = {
+        provider: plugin.id,
+        sourceRef,
+        targetRef,
+        reason,
+        pullRequestFallback: Boolean(
+          plugin.capabilities.pullRequestWrites && typeof plugin.createPullRequest === 'function'
+        )
+      }
+    }
+    throw err
+  }
+  return { sourceRef, targetRef, ...result }
+}
+
+/**
+ * Opens a pull request from sourceRef into targetRef without rewriting either
+ * branch. This is the supported path when a provider's branch policy refuses a
+ * direct merge: completing the PR merges the whole branch, so the source
+ * commits keep their ids.
+ */
+export async function openPullRequest ({ repoId, sourceRef, targetRef, title, description }) {
+  const { repo, plugin } = await repoWithPlugin(repoId)
+  if (!plugin.capabilities.pullRequestWrites || typeof plugin.createPullRequest !== 'function') {
+    const err = new Error(`${plugin.name} cannot open pull requests from this console`)
+    err.status = 400
+    err.hint = 'Open the pull request in the provider, or run the merge locally with the git commands in the dialog.'
+    throw err
+  }
+  if (!sourceRef || !targetRef || sourceRef === targetRef) {
+    const err = new Error('Pick two different branches for the pull request')
+    err.status = 400
+    throw err
+  }
+  const pullRequest = await plugin.createPullRequest(repo.coords, {
     sourceRef,
     targetRef,
-    comment: `Merge ${sourceRef} into ${targetRef}`
+    title: title || `Merge ${sourceRef} into ${targetRef}`,
+    description: description ||
+      `Opened from the Hermit console. Complete this with a merge commit (not a squash) to keep the original commit ids.`
   })
-  return { sourceRef, targetRef, ...result }
+  return { sourceRef, targetRef, repo: await publicRepo(repo), pullRequest }
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { activePullRequests, branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, mergeSourceBranch, releaseOverview } from '../lib/git-service.mjs'
+import { activePullRequests, branchesFor, CHERRY_PICK_MODES, cherryPick, compareAcrossRepos, compareRefs, mergeSourceBranch, openPullRequest, releaseOverview } from '../lib/git-service.mjs'
 import { getDb } from '../lib/db.mjs'
 
 export const gitRouter = Router()
@@ -100,5 +100,31 @@ gitRouter.post('/merge-branches', async (req, res, next) => {
       return res.status(400).json({ error: 'Pick two different branches to merge' })
     }
     res.json(await mergeSourceBranch({ repoId, sourceRef, targetRef }))
+  } catch (err) { next(err) }
+})
+
+/**
+ * Opens a pull request between two existing branches — the fallback when a
+ * branch policy refuses the ref update a direct merge needs. It is a write on
+ * the user's behalf, so it shares the cherry-pick write switch; the provider
+ * has to declare that it can create pull requests.
+ */
+gitRouter.post('/pull-requests', async (req, res, next) => {
+  try {
+    const db = await getDb()
+    if (!db.data.settings.allowCherryPickWrites) {
+      return res.status(403).json({
+        error: 'Opening pull requests is disabled',
+        hint: 'Enable "Allow cherry-pick writes" in Settings first.'
+      })
+    }
+    const { repoId, sourceRef, targetRef, title, description } = req.body || {}
+    if (!repoId || !sourceRef || !targetRef) {
+      return res.status(400).json({ error: 'repoId, sourceRef and targetRef are required' })
+    }
+    if (sourceRef === targetRef) {
+      return res.status(400).json({ error: 'The source and target branch must differ' })
+    }
+    res.json(await openPullRequest({ repoId, sourceRef, targetRef, title, description }))
   } catch (err) { next(err) }
 })
