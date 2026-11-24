@@ -21,6 +21,7 @@ const HELP = `hermit — a local git release and Jira console
 
 Usage
   hermit [options]                 start the console
+  hermit demo [options]            start with fictional Aurora demo data
   hermit backup [options]          write a timestamped backup tarball
   hermit restore <file> [options]  load a backup into the data directory
   hermit help                      show this help
@@ -30,6 +31,7 @@ Serve options
   -p, --port <n>      port to listen on (default: the last one used, else any free port)
       --host <addr>   interface to bind (default: 127.0.0.1)
       --data-dir <p>  where db.json and cache.json are stored
+      --demo          use the fictional Aurora demo data, with no credentials or network calls
       --no-open       do not open a browser
   -h, --help          show this help
   -v, --version       print the version
@@ -51,7 +53,7 @@ reads credentials from ~/.authinfo and never sends them anywhere other than the
 hosts they belong to.`
 
 function serveOptions (argv) {
-  const opts = { port: 0, host: '127.0.0.1', open: true, help: false, version: false, dataDir: undefined }
+  const opts = { port: 0, host: '127.0.0.1', open: true, help: false, version: false, dataDir: undefined, demo: false }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const eq = arg.indexOf('=')
@@ -61,6 +63,7 @@ function serveOptions (argv) {
     if (key === '--port' || key === '-p') opts.port = Number(value())
     else if (key === '--host') opts.host = value()
     else if (key === '--data-dir') opts.dataDir = value()
+    else if (key === '--demo') opts.demo = true
     else if (key === '--no-open') opts.open = false
     else if (key === '--help' || key === '-h') opts.help = true
     else if (key === '--version' || key === '-v') opts.version = true
@@ -142,7 +145,7 @@ async function runServe (argv) {
 
   // Imported after the data-dir override so the store resolves the right path.
   const { start } = await import('../server/index.mjs')
-  const { server, url } = await start({ port: opts.port, host: opts.host })
+  const { server, url } = await start({ port: opts.port, host: opts.host, demo: opts.demo })
   if (opts.open) openBrowser(url)
   console.log('\nPress Ctrl-C to stop.')
 
@@ -187,7 +190,8 @@ async function runRestore (argv) {
 
 const argv = process.argv.slice(2)
 const command = argv[0]
-const known = command === 'backup' || command === 'restore' || command === 'serve' || command === 'help' || command === 'version'
+const known = command === 'demo' || command === 'backup' || command === 'restore' ||
+  command === 'serve' || command === 'help' || command === 'version'
 
 try {
   if (known) {
@@ -195,6 +199,7 @@ try {
     if (command === 'backup') await runBackup(args)
     else if (command === 'restore') await runRestore(args)
     else if (command === 'serve') await runServe(args)
+    else if (command === 'demo') await runServe([...args, '--demo'])
     else if (command === 'version') console.log(pkg.version)
     else console.log(HELP)
   } else {

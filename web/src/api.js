@@ -22,6 +22,7 @@ async function call (path, { method = 'GET', body, signal } = {}) {
 
 export const api = {
   health: () => call('/health'),
+  demo: () => call('/demo'),
   auth: (refresh) => call(`/auth${refresh ? '?refresh=1' : ''}`),
 
   settings: () => call('/settings'),

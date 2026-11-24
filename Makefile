@@ -20,7 +20,7 @@ NEWEST_BACKUP  = $(shell ls -1t $(BACKUP_DIR)/hermit-backup-*.tar.gz 2>/dev/null
 VERSION = $(shell $(NODE) -p "require('./package.json').version")
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart status logs dev build install clean reset backup restore open secret publish release
+.PHONY: help up down restart status logs dev build install clean reset demo backup restore open secret publish release
 
 help: ## Show this help
 	@echo "Hermit console"
@@ -40,6 +40,9 @@ build: install ## Build the web UI
 
 up: build ## Start the app in the background, reusing the last port if it is free
 	@$(NODE) scripts/start.mjs
+
+demo: build ## Run with the fictional Aurora demo data (no credentials needed)
+	@$(NODE) bin/hermit.mjs demo
 
 dev: install ## Start with hot reload (also backgrounded; stop with make down)
 	@$(NODE) scripts/start.mjs --dev

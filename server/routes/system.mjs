@@ -10,6 +10,11 @@ systemRouter.get('/health', (req, res) => {
   res.json({ ok: true, pid: process.pid, uptime: process.uptime() })
 })
 
+/** Demo mode answers /api/demo itself; this is the production answer. */
+systemRouter.get('/demo', (req, res) => {
+  res.json({ demo: false })
+})
+
 systemRouter.get('/auth', async (req, res, next) => {
   try {
     if (req.query.refresh === '1') invalidateAuthinfo()

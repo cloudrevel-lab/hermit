@@ -15,6 +15,10 @@ Repositories can live on **Azure DevOps** or **GitHub**, mixed freely in the
 same comparison. Each provider is a plugin, so adding Bitbucket or GitLab means
 dropping a folder into `server/plugins/` — see [AGENT.md](AGENT.md).
 
+The screenshots in this README use a fictional **Aurora** project — sample
+repositories, Jira tickets and worklogs — so no real data is shown. Run
+`npx hermit-console demo` to open that same populated console yourself.
+
 ---
 
 ## Install
@@ -72,6 +76,7 @@ checkout).
 
 ```
 hermit [options]                 start the console
+hermit demo [options]            start with fictional Aurora demo data
 hermit backup [options]          write a timestamped tarball of db.json and cache.json
 hermit restore <file> [options]  load a backup into the data directory
 
@@ -79,6 +84,7 @@ Start options
   -p, --port <n>      port to listen on (default: any free port)
       --host <addr>   interface to bind (default: 127.0.0.1)
       --data-dir <p>  where db.json and cache.json are stored
+      --demo          use fictional demo data, with no credentials or network calls
       --no-open       do not open a browser
   -h, --help          show this help
   -v, --version       print the version
@@ -153,6 +159,7 @@ notices and cleans up the stale PID file.
 | `make open` | Open the running app in your browser |
 | `make logs` | Follow the server log |
 | `make dev` | Start with hot reload (also backgrounded; stop with `make down`) |
+| `make demo` | Run with the fictional Aurora demo data (foreground; Ctrl-C stops) |
 | `make build` | Build the UI without starting anything |
 | `make install` | Install dependencies |
 | `make clean` | Remove `web/dist` and `.run` |
@@ -168,6 +175,28 @@ notices and cleans up the stale PID file.
 **Without `make`** (for example on Windows without Bash), the equivalents are
 `npm install`, `npm run build`, then `npm run server`. The server prints its
 URL on startup and stops with Ctrl-C.
+
+## Demo mode
+
+Every page can be explored without a repository, Jira account or `~/.authinfo`:
+
+```bash
+make demo                 # source checkout
+npm run demo              # same, without make
+npx hermit-console demo   # installed package
+```
+
+Hermit starts with the fictional **Aurora** project — six sample repositories
+(five enabled, one disabled to show the switch), release branches, commits,
+open pull requests, pinned Fix Versions, worklogs and a corporate certificate.
+Dates are relative to the day you start it, so the comparison and Time logger
+stay current. The app bar shows a **Demo data** chip, and no outbound request
+is made: the demo replaces the API rather than calling a provider or Jira.
+
+Writes are simulated in memory and disappear on restart. Reset without
+restarting with `curl -X POST "$URL/api/demo/reset"`. See
+[`demo/README.md`](demo/README.md) for the full tour, limitations and how to
+extend the fixtures; `npm run test:demo` exercises the same server in CI.
 
 ## Credentials
 
@@ -209,6 +238,11 @@ and Jira with the credentials above. Anyone who can reach it can use them, so do
 not expose it on a network interface or put it behind a tunnel. The **Time
 logger** and cherry-pick writes change data remotely; every other page is
 read-only.
+
+![Credentials parsed from ~/.authinfo](docs/screenshots/settings-credentials.png)
+
+*Providers and the parsed credentials — hosts and logins only, never the
+secrets.*
 
 ## Configure
 
@@ -255,6 +289,16 @@ compare together in one view.
 the repo before you save it. Repos can be disabled rather than deleted, which
 keeps them out of comparisons without losing the entry.
 
+![Repositories page listing Azure DevOps and GitHub repositories](docs/screenshots/repositories.png)
+
+*The repository list, with provider, namespace and the enable switch that scopes
+release comparisons.*
+
+![Adding a repository, with provider detection and a successful test connection](docs/screenshots/repositories-add.png)
+
+*Adding a repository — the provider is detected from the URL, and **Test
+connection** confirms it is readable before you save it.*
+
 ### 2. Compare two releases
 
 On **Release compare**, pick the base and target. Your last pair is remembered
@@ -267,7 +311,13 @@ non-semver branches like `release/2025-05-02`.
 The cherry-pick page remembers its repository and both refs the same way.
 
 Before you compare, the page shows a **coverage grid**: which repos have a
-branch for each release. After you compare, you get per-repo commit lists with
+branch for each release.
+
+![Release branch coverage across repositories](docs/screenshots/release-compare-coverage.png)
+
+*Before comparing: which repositories carry a branch for each release.*
+
+After you compare, you get per-repo commit lists with
 SHAs linking back to Azure DevOps and file change counts. **Back to coverage**
 returns to that grid without losing the selected pair.
 
@@ -302,6 +352,12 @@ reason, rather than being silently dropped.
 **Copy notes** puts the whole comparison on the clipboard as Markdown, grouped
 by repo — usable as a release-notes starting point.
 
+![Release comparison with Jira cross-check and commit provenance](docs/screenshots/release-compare-results.png)
+
+*A completed comparison: commit totals, Jira drift in both directions, and
+per-repository commit lists with the branch and pull request each commit came
+through.*
+
 ### 3. See which repositories carry a release
 
 **Release repositories** answers the other half of the question before a
@@ -316,6 +372,11 @@ not have the branch are listed separately, under **Without
 release/<version>**, so it is clear they are not part of this release. The
 version and repository filter are remembered per browser, like the compare
 page's pair.
+
+![Release repositories for a version](docs/screenshots/release-repositories.png)
+
+*Release repositories for 2.4.0 — every repository that has the branch, its tip,
+and a link straight to it.*
 
 ### 4. Review active pull requests
 
@@ -341,6 +402,11 @@ token, a rate limit — gets its own error card instead of hiding the rest.
 Disabled repositories are included here: the switch under **Repositories** only
 scopes release comparisons.
 
+![Open pull requests across Azure DevOps and GitHub](docs/screenshots/pull-requests.png)
+
+*Open pull requests across both providers, with the banner counting the ones
+awaiting your review.*
+
 ### 5. Cross-check against Jira
 
 Paste the Jira release URL into the cross-check panel, for example:
@@ -365,6 +431,11 @@ does not.
 The pattern is a regex you can change in Settings. The default,
 `[A-Z][A-Z0-9]+-\d+`, matches `PROJ-482` but not `PROJ 482` with a space.
 
+![Jira cross-check showing drift in both directions](docs/screenshots/jira-cross-check.png)
+
+*The cross-check: issues in the Jira release with no matching commit, and commit
+keys that are missing from the release.*
+
 ### 6. Pin a Jira release
 
 **Jira releases** lists every ticket carrying a given Fix Version, for example
@@ -381,6 +452,11 @@ of the cache.
 The name is matched literally, exactly as Jira has it, so a typo simply returns
 no tickets — the page says so rather than showing an empty table.
 
+![Jira release tickets with status breakdown](docs/screenshots/jira-releases.png)
+
+*A pinned Fix Version with its done / in progress / to do breakdown and ticket
+table.*
+
 ### 7. Cherry-pick between branches
 
 **Cherry-pick** compares any two refs in a single repo side by side. Each pane
@@ -396,6 +472,11 @@ git switch -c cherry-pick/release-1.2.2-mts380e1 origin/release/1.2.2
 git cherry-pick 3c3f26fb61 965fc591e3 0a9c917847
 git push -u origin cherry-pick/release-1.2.2-mts380e1
 ```
+
+![Cherry-pick comparison with commits staged](docs/screenshots/cherry-pick.png)
+
+*Comparing `release/2.3.0` and `release/2.4.0`; two commits are staged to
+backport.*
 
 Turning on **Allow cherry-pick writes** in Settings lets the console ask the
 provider to apply them for you — where the provider supports it. Azure DevOps
@@ -434,6 +515,11 @@ brief naming the repository, the source and target branches and the exact
 commits, for when you would rather have an AI agent (or yourself) run the merge
 locally.
 
+![Cherry-pick apply dialog with modes, git commands and an AI prompt](docs/screenshots/cherry-pick-dialog.png)
+
+*The apply dialog: how far to carry the commits, the exact git commands, and the
+ready-to-paste prompt for an AI tool.*
+
 ### 8. Log your time
 
 **Time logger** reconciles your Jira worklogs against a date range and lets you
@@ -443,6 +529,11 @@ another range — or a quick preset, **Today**, **This week**, **Last week**,
 **This month**, **Last month**, **Last 2 months** — and press **Retrieve**.
 Every day comes back with the tickets you logged time on and an editable hours
 box.
+
+![Time logger week with an expanded ticket and worklog comments](docs/screenshots/time-logger.png)
+
+*A week of worklogs, with a ticket expanded to show each entry's start time and
+comment.*
 
 Days are listed **latest first**; the button beside **Retrieve** reverses that
 to earliest first, and the choice is remembered across visits. Leave the page
@@ -496,6 +587,11 @@ is verified, hovering the **Add ticket** box shows that ticket's title — and i
 status when the check fetched one — so you can confirm it is the work you meant
 before logging.
 
+![Time logger typo guard for a ticket outside the recent window](docs/screenshots/time-logger-typo.png)
+
+*The typo guard: a key outside your recently logged tickets is confirmed before
+anything is written.*
+
 A confirmation dialog appears only when something would be destroyed: setting a
 day to 0, or collapsing a ticket that has several entries that day into one.
 Those rows are marked with an amber *"N entries"* chip. Everything else applies
@@ -535,6 +631,11 @@ settings above. The working day defaults to 8h and new worklogs are stamped at
 | Time logger recent-ticket lookback | `21` | Days back the typo guard checks a newly typed key against |
 | Cert for corp network | — | Root CA to trust on a network that inspects HTTPS |
 
+![Settings for release conventions, dates, Jira and the Time logger](docs/screenshots/settings.png)
+
+*Settings covers release conventions, display dates and times, Jira, and the
+Time logger.*
+
 ## Corporate networks
 
 Networks that inspect HTTPS re-sign every connection with an internal root
@@ -548,6 +649,11 @@ effect immediately — no restart.
 Only certificate authorities are trusted. Anything else in the file (a site's
 own certificate, for instance) is kept but marked *ignored*, so pasting a whole
 chain is safe.
+
+![Corporate root CA installed in Settings](docs/screenshots/settings-certificate.png)
+
+*The corporate root CA, stored and trusted at runtime — no restart and no change
+to the system trust store.*
 
 ### Exporting the root certificate
 

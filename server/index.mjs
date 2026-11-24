@@ -15,8 +15,17 @@ import { recall as recallPort, remember as rememberPort } from './lib/port-memor
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const app = express()
 
+// Set only by start({ demo: true }). The gate stays in front of the production
+// routers so demo mode can be selected at start time without rebuilding the app.
+let demoHandler = null
+
 app.disable('x-powered-by')
 app.use(express.json({ limit: '2mb' }))
+
+app.use('/api', (req, res, next) => {
+  if (demoHandler) return demoHandler(req, res, next)
+  next()
+})
 
 app.use('/api/repos', reposRouter)
 app.use('/api/git', gitRouter)
@@ -64,19 +73,35 @@ app.use((err, req, res, next) => {
  * An explicitly requested port is never second-guessed: if it is taken, that is
  * an error the caller asked for rather than something to work around.
  */
-export async function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1' } = {}) {
+export async function start ({ port = Number(process.env.PORT || 0), host = process.env.HOST || '127.0.0.1', demo = false } = {}) {
+  // A production start in the same process must not inherit an earlier demo
+  // handler; the reverse only happens in tests that start one server at a time.
+  if (!demo) demoHandler = null
+  if (demo) {
+    // The demo API is the only thing that should answer /api, and loading it
+    // here keeps the production routers from reading ~/.authinfo or data/.
+    const { createDemoRouter } = await import('../demo/api.mjs')
+    demoHandler = createDemoRouter()
+    console.log('demo mode: fictional Aurora data; no credentials, repositories or Jira calls are used')
+  }
+
   // The corporate root CA has to be in the trust store before the first
   // outbound request, so it is loaded here rather than on demand. A failure
   // here is not fatal: the app still runs, it just cannot reach Jira from
-  // inside an intercepting network until the certificate is sorted out.
-  try {
-    if (await installCorpCert()) console.log('Loaded the corporate root CA')
-  } catch (err) {
-    console.error('Could not load the corporate root CA:', err.message)
+  // inside an intercepting network until the certificate is sorted out. Demo
+  // mode never makes an outbound request, so it skips the trust store entirely.
+  if (!demo) {
+    try {
+      if (await installCorpCert()) console.log('Loaded the corporate root CA')
+    } catch (err) {
+      console.error('Could not load the corporate root CA:', err.message)
+    }
   }
 
-  // Only an automatic port (0) is open to being remembered or reassigned.
-  const automatic = !port
+  // Only an automatic port (0) is open to being remembered or reassigned. A
+  // demo never reads or writes the real data directory, so it asks for a fresh
+  // port rather than competing with the production instance's remembered one.
+  const automatic = !port && !demo
   const wanted = automatic ? (await recallPort()) ?? 0 : port
 
   let server
@@ -90,7 +115,7 @@ export async function start ({ port = Number(process.env.PORT || 0), host = proc
 
   const actual = server.address().port
   const url = `http://${host}:${actual}`
-  await rememberPort(actual)
+  if (!demo) await rememberPort(actual)
   if (process.env.PORT_FILE) await writeFile(process.env.PORT_FILE, String(actual))
   console.log(`hermit listening on ${url}`)
   // The start script watches for this line to learn the port it got.

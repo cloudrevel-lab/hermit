@@ -11,6 +11,8 @@
     "bin/",
     "server/",
     "web/dist/",
+    "docs/screenshots/",
+    "demo/",
     "README.md",
     "AGENT.md",
     "LICENSE"
@@ -45,7 +47,9 @@
     "hermit": "node bin/hermit.mjs",
     "publish:npm": "node scripts/publish-npm.mjs",
     "set-npm-token": "node scripts/set-npm-token.mjs",
-    "prepack": "vite build"
+    "prepack": "vite build",
+    "demo": "npm run build && node bin/hermit.mjs demo",
+    "test:demo": "node --test demo/demo.test.mjs"
   },
   "dependencies": {
     "express": "^5.2.1",

@@ -14,6 +14,9 @@ const rail = ref(false)
 const auth = ref(null)
 const repos = ref([])
 const providers = ref([])
+// True only when served by `hermit demo`; the app bar then says so, because
+// every repository, ticket and worklog on screen is fictional.
+const demo = ref(false)
 
 // Pages whose in-memory state is expensive to rebuild stay mounted while the
 // user visits another page, so coming back is instant rather than a reload.
@@ -81,12 +84,13 @@ onMounted(async () => {
     .then(({ settings }) => setDisplayTimezone(settings.timezone))
     .catch(() => { /* dates fall back to the browser zone */ })
 
-  const [authRes, reposRes, providersRes] = await Promise.allSettled([
-    api.auth(), api.repos(), api.providers()
+  const [authRes, reposRes, providersRes, demoRes] = await Promise.allSettled([
+    api.auth(), api.repos(), api.providers(), api.demo()
   ])
   if (authRes.status === 'fulfilled') auth.value = authRes.value
   if (reposRes.status === 'fulfilled') repos.value = reposRes.value.repos
   if (providersRes.status === 'fulfilled') providers.value = providersRes.value.providers
+  if (demoRes.status === 'fulfilled') demo.value = Boolean(demoRes.value.demo)
 })
 </script>
 
@@ -131,6 +135,16 @@ onMounted(async () => {
     <v-app-bar flat border height="56">
       <v-app-bar-title class="page-title">{{ route.meta.title }}</v-app-bar-title>
       <v-spacer />
+
+      <v-tooltip v-if="demo" location="bottom"
+                 text="Fictional Aurora demo data — no credentials or live services are used">
+        <template #activator="{ props }">
+          <v-chip v-bind="props" size="small" class="mr-2" variant="tonal" color="info"
+                  prepend-icon="mdi-flask-outline">
+            Demo data
+          </v-chip>
+        </template>
+      </v-tooltip>
 
       <v-tooltip v-for="chip in providerChips" :key="chip.id" location="bottom" :text="chip.tooltip">
         <template #activator="{ props }">

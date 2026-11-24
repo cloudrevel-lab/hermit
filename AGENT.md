@@ -63,9 +63,16 @@ else's time or any repository.
 Makefile               Entry point for a source checkout; see targets in README
 vite.config.mjs        Vite config; root is web/, proxies /api in dev
 package.json           Publishes the installable package; prepack builds the UI
-bin/hermit.mjs         Installed CLI: serves the app, plus backup/restore subcommands
+bin/hermit.mjs         Installed CLI: serves the app, plus demo and backup/restore subcommands
 install.sh             macOS/Linux one-line installer (bootstraps Node if needed)
 install.ps1            Windows one-line installer
+
+demo/
+  README.md            How to run/reset/extend the fictional Aurora demo
+  fixtures.mjs         In-memory dataset, dynamic dates and API-shape builders
+  api.mjs              /api router mounted instead of the real routers in demo mode
+  demo.test.mjs        node:test smoke test (npm run test:demo)
+  capture-screenshots.mjs  Optional Playwright run that rebuilds docs/screenshots
 
 scripts/
   runtime.mjs          Shared paths, PID file read/write, liveness checks
@@ -217,11 +224,27 @@ because the enable switch only scopes release comparisons — calls
 error slot for any repo that fails. It needs no branch data, so a slow provider
 cannot delay the others.
 
+## Demo mode
+
+`hermit demo` / `make demo` starts the same UI against `demo/api.mjs`, mounted at
+`/api` in front of the production routers when `start({ demo: true })` runs. The
+demo answers every endpoint the UI uses from `demo/fixtures.mjs`; writes mutate
+an in-memory copy and `POST /api/demo/reset` restores it. It deliberately skips
+`~/.authinfo`, `data/`, the corporate-trust-store load, provider plugins' HTTP
+calls and port memory, so it can run alongside a real instance and never touches
+real data. The app bar shows a **Demo data** chip from `GET /api/demo`.
+
+Keep the demo's JSON shapes in step with the real routes and extend
+`demo/demo.test.mjs` when adding a page or endpoint. The demo is a UI/API-shape
+fixture, not a provider-plugin or Jira-client test; see `demo/README.md`.
+
 ## API surface
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness; used by `make status` |
+| GET | `/api/demo` | `{demo: true/false}`; drives the Demo data badge |
+| POST | `/api/demo/reset` | Reset the demo store (demo mode only) |
 | GET | `/api/auth` | Which hosts have credentials (never the secrets). `?refresh=1` re-reads the file |
 | GET/PUT | `/api/settings` | Read and merge settings |
 | GET/DELETE | `/api/cache` | Cache stats; clear all or by `?prefix=` |
